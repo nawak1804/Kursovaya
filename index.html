@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Japan Trip Planner</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar card">
+        <div>
+          <h1>Japan Trip Planner</h1>
+          <p>31.08 → 16.09 · Осака → (ночной автобус) → Токио</p>
+        </div>
+        <div class="toolbar">
+          <label class="switch-row"><input id="compact" type="checkbox" />Компактно</label>
+          <label class="switch-row"><input id="showNotes" type="checkbox" checked />Заметки</label>
+          <input id="search" type="text" placeholder="Поиск: Киото, 09:00, castle" />
+          <button id="exportBtn">Экспорт JSON</button>
+          <label class="file-btn">
+            Импорт JSON
+            <input id="importInput" type="file" accept="application/json" />
+          </label>
+          <button id="resetBtn" class="secondary">Сброс</button>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>Распределение по городам</h2>
+        <div id="summary" class="summary"></div>
+      </section>
+
+      <section class="card">
+        <h2>Календарная лента</h2>
+        <div id="timeline" class="timeline"></div>
+      </section>
+
+      <main class="content-grid">
+        <section class="card">
+          <div class="panel-header">
+            <h2>Задачи дня</h2>
+            <button id="addTaskBtn">+ Добавить</button>
+          </div>
+          <div id="dayDetails" class="muted">Выберите день в ленте сверху.</div>
+          <div id="tasks"></div>
+        </section>
+
+        <aside class="card tips">
+          <h2>Логистика</h2>
+          <div class="note"><b>Осака → Токио:</b> ночной автобус 09.09 21:00 → 10.09 07:00.</div>
+          <div class="note"><b>Туда:</b> 31.08 21:05 LED → 01.09 18:00 KIX.</div>
+          <div class="note"><b>Обратно:</b> 16.09 08:40 HND → 19:05 LED.</div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
