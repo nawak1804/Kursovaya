@@ -7,22 +7,20 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app">
-      <header class="topbar card">
+    <div class="app-shell">
+      <header class="card header-card">
         <div>
           <h1>Japan Trip Planner</h1>
           <p>31.08 → 16.09 · Осака → (ночной автобус) → Токио</p>
         </div>
-        <div class="toolbar">
-          <label class="switch-row"><input id="compact" type="checkbox" />Компактно</label>
-          <label class="switch-row"><input id="showNotes" type="checkbox" checked />Заметки</label>
-          <input id="search" type="text" placeholder="Поиск: Киото, 09:00, castle" />
-          <button id="exportBtn">Экспорт JSON</button>
-          <label class="file-btn">
-            Импорт JSON
-            <input id="importInput" type="file" accept="application/json" />
-          </label>
-          <button id="resetBtn" class="secondary">Сброс</button>
+
+        <div class="header-actions">
+          <label class="toggle-pill"><span>Компактно</span><input id="compact" type="checkbox" /></label>
+          <label class="toggle-pill"><span>Заметки</span><input id="showNotes" type="checkbox" checked /></label>
+          <input id="search" class="input" type="text" placeholder="Поиск: Киото, 09:00, castle" />
+          <button id="exportBtn" class="btn btn-ghost">Экспорт</button>
+          <label class="btn btn-ghost file-label">Импорт<input id="importInput" type="file" accept="application/json" /></label>
+          <button id="settingsBtn" class="btn btn-main">Настроить дни</button>
         </div>
       </header>
 
@@ -36,23 +34,57 @@
         <div id="timeline" class="timeline"></div>
       </section>
 
-      <main class="content-grid">
+      <main class="main-grid">
         <section class="card">
-          <div class="panel-header">
+          <div class="panel-top">
             <h2>Задачи дня</h2>
-            <button id="addTaskBtn">+ Добавить</button>
+            <div class="panel-top-right">
+              <span id="selectedCityBadge" class="badge badge-soft"></span>
+              <button id="addTaskBtn" class="btn btn-main">+ Добавить</button>
+            </div>
           </div>
-          <div id="dayDetails" class="muted">Выберите день в ленте сверху.</div>
-          <div id="tasks"></div>
+
+          <div id="dayHeader" class="day-header muted">Выберите день в ленте сверху.</div>
+          <div id="tasks" class="task-list"></div>
         </section>
 
-        <aside class="card tips">
-          <h2>Логистика</h2>
-          <div class="note"><b>Осака → Токио:</b> ночной автобус 09.09 21:00 → 10.09 07:00.</div>
-          <div class="note"><b>Туда:</b> 31.08 21:05 LED → 01.09 18:00 KIX.</div>
-          <div class="note"><b>Обратно:</b> 16.09 08:40 HND → 19:05 LED.</div>
+        <aside class="card">
+          <h2>Памятка / логистика</h2>
+          <div class="tabs">
+            <button class="tab active" data-tab="moves">Переезды</button>
+            <button class="tab" data-tab="tickets">Билеты</button>
+            <button class="tab" data-tab="tips">Советы</button>
+          </div>
+          <div id="tabContent" class="tab-content"></div>
         </aside>
       </main>
+
+      <p class="hint">Подсказка: перетаскивайте карточки задач между днями через верхнюю ленту.</p>
+    </div>
+
+    <div id="settingsModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-body card">
+        <div class="modal-head">
+          <h2>Настроить дни (город и заголовок)</h2>
+          <button id="closeSettings" class="btn btn-ghost">Закрыть</button>
+        </div>
+
+        <div class="modal-grid">
+          <div id="settingsDays" class="settings-days"></div>
+          <div class="settings-side">
+            <div class="card inner-card">
+              <h3>Шаблоны</h3>
+              <button id="resetBtn" class="btn btn-ghost stretch">Сбросить к базовому плану</button>
+              <button id="kyotoNightBtn" class="btn btn-ghost stretch">Опция: добавить ночёвку в Киото</button>
+            </div>
+            <div class="card inner-card">
+              <h3>Пояснение</h3>
+              <p>Интерфейс максимально приближен к travel-planner: карточки, табы, редактирование и drag&drop.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script src="app.js"></script>
