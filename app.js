@@ -4,9 +4,11 @@ const CITY = {
 const CITY_ICON = { [CITY.OSAKA]:'🏮',[CITY.KYOTO]:'⛩️',[CITY.NARA]:'🦌',[CITY.TOKYO]:'🗼',[CITY.BUS]:'🚌',[CITY.FLIGHT]:'✈️' };
 const CITY_CLASS = { [CITY.OSAKA]:'city-osaka',[CITY.KYOTO]:'city-kyoto',[CITY.NARA]:'city-nara',[CITY.TOKYO]:'city-tokyo',[CITY.BUS]:'city-bus',[CITY.FLIGHT]:'city-flight' };
 
-const STORE_KEY = 'jp_planner_v4';
+const STORE_KEY = 'jp_planner_v5';
 const SYNC_KEY = 'jp_planner_sync_cfg';
 const clientId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
+const undoStack = [];
+const redoStack = [];
 
 const state = load() || {
   compact:false,
@@ -14,24 +16,21 @@ const state = load() || {
   search:'',
   activeTab:'moves',
   theme:'light',
+  dayView:'list',
   selectedDayId:null,
   days:makeDefaultDays(),
+  activityLog: [],
 };
 if (!state.selectedDayId) state.selectedDayId = state.days[1]?.id || state.days[0]?.id;
+if (!Array.isArray(state.activityLog)) state.activityLog = [];
 
 const syncState = {
-  config: loadSyncConfig(),
-  connected: false,
-  app: null,
-  db: null,
-  ref: null,
-  unsub: null,
-  mutePush: false,
-  lastRemoteTs: 0,
+  config: loadSyncConfig(), connected: false, app: null, db: null, ref: null, unsub: null, mutePush: false, lastRemoteTs: 0,
 };
 
 const el = {
-  themeToggle: byId('themeToggle'),
+  themeToggle: byId('themeToggle'), viewModeBtn: byId('viewModeBtn'), undoBtn: byId('undoBtn'), redoBtn: byId('redoBtn'),
+  activityLog: byId('activityLog'), backToTop: byId('backToTop'),
   compact: byId('compact'), showNotes: byId('showNotes'), search: byId('search'), exportBtn: byId('exportBtn'),
   importInput: byId('importInput'), settingsBtn: byId('settingsBtn'), summary: byId('summary'), timeline: byId('timeline'),
   selectedCityBadge: byId('selectedCityBadge'), addTaskBtn: byId('addTaskBtn'), dayHeader: byId('dayHeader'), tasks: byId('tasks'),
@@ -52,16 +51,28 @@ function init() {
   el.search.value = state.search;
 
   el.themeToggle.onchange = () => {
-    state.theme = el.themeToggle.checked ? 'dark' : 'light';
-    save();
-    applyTheme();
+    applyChange('Переключение темы', () => {
+      state.theme = el.themeToggle.checked ? 'dark' : 'light';
+      applyTheme();
+    });
+  };
+  el.viewModeBtn.onclick = () => {
+    state.dayView = state.dayView === 'list' ? 'timeline' : 'list';
+    save(); renderSelectedDay();
   };
   el.compact.onchange = () => patchState({ compact: el.compact.checked });
   el.showNotes.onchange = () => patchState({ showNotes: el.showNotes.checked });
   el.search.oninput = () => patchState({ search: el.search.value });
   el.exportBtn.onclick = exportJSON;
   el.importInput.onchange = importJSON;
-  el.addTaskBtn.onclick = () => state.selectedDayId && mutateDay(state.selectedDayId, (d) => d.tasks.push(makeTask()));
+  el.addTaskBtn.onclick = () => state.selectedDayId && applyChange('Добавлена задача', () => {
+    const day = state.days.find((d) => d.id === state.selectedDayId);
+    if (!day) return;
+    day.tasks.push(makeTask());
+  });
+
+  el.undoBtn.onclick = undo;
+  el.redoBtn.onclick = redo;
 
   el.settingsBtn.onclick = () => openModal(el.settingsModal, true);
   el.closeSettings.onclick = () => openModal(el.settingsModal, false);
@@ -73,32 +84,38 @@ function init() {
 
   document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => { state.activeTab = tab.dataset.tab; save(); renderTabs(); });
 
-  el.addDayBtn.onclick = () => {
+  el.addDayBtn.onclick = () => applyChange('Добавлен новый день', () => {
     const newDay = { id: uid(), dateLabel: nextDateLabel(), title: 'Новый день', city: CITY.OSAKA, tasks: [] };
     state.days.push(newDay);
     state.selectedDayId = newDay.id;
-    save(); render(); pushSync();
-  };
+  });
 
-  el.resetBtn.onclick = () => {
+  el.resetBtn.onclick = () => applyChange('Сброс к базовому плану', () => {
     state.days = makeDefaultDays();
     state.selectedDayId = state.days[1]?.id || state.days[0]?.id;
-    save(); render(); pushSync();
-  };
-  el.kyotoNightBtn.onclick = () => {
+  });
+
+  el.kyotoNightBtn.onclick = () => applyChange('Добавлена ночёвка в Киото', () => {
     const target = state.days.find((d) => d.title.includes('свободный') && d.city === CITY.OSAKA);
     if (!target) return;
-    target.city = CITY.KYOTO; target.title = 'Киото (ночёвка)';
-    save(); render(); pushSync();
-  };
+    target.city = CITY.KYOTO;
+    target.title = 'Киото (ночёвка)';
+  });
 
   el.connectSync.onclick = connectSync;
   el.disconnectSync.onclick = disconnectSync;
   fillSyncForm();
   renderSyncStatus('Sync не подключен');
 
+  window.addEventListener('scroll', onScroll);
+  el.backToTop.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+
   render();
   if (syncState.config?.apiKey) connectSync(true);
+}
+
+function onScroll() {
+  el.backToTop.classList.toggle('show', window.scrollY > 380);
 }
 
 function applyTheme() {
@@ -111,15 +128,19 @@ function render() {
   renderSelectedDay();
   renderTabs();
   renderSettingsDays();
+  renderActivityLog();
+  el.viewModeBtn.textContent = state.dayView === 'list' ? 'Таймлайн по часам' : 'Режим карточек';
 }
+
 function renderSummary() {
   const map = new Map();
   state.days.forEach((d) => map.set(d.city, (map.get(d.city) || 0) + 1));
   el.summary.innerHTML = [...map.entries()].map(([city, c]) => `<span class="badge">${CITY_ICON[city]} ${city}: ${c}</span>`).join('');
 }
+
 function renderTimeline() {
   const q = state.search.trim().toLowerCase();
-  const days = state.days.filter((d) => !q || `${d.dateLabel} ${d.title} ${d.city}`.toLowerCase().includes(q) || d.tasks.some((t) => `${t.time} ${t.title} ${t.notes} ${t.tag}`.toLowerCase().includes(q)));
+  const days = state.days.filter((d) => !q || `${d.dateLabel} ${d.title} ${d.city}`.toLowerCase().includes(q) || d.tasks.some((t) => `${t.time} ${t.title} ${t.notes} ${t.tag} ${t.mapUrl || ''}`.toLowerCase().includes(q)));
   el.timeline.innerHTML = '';
   days.forEach((d, i) => {
     const card = document.createElement('button');
@@ -135,11 +156,13 @@ function renderTimeline() {
     el.timeline.appendChild(card);
   });
 }
+
 function renderDayPreview(tasks) {
   if (!tasks.length) return '<div class="day-preview"><span>Нет задач</span></div>';
   const rows = tasks.slice(0, 3).map((t) => `<span>${t.time ? `${t.time} · ` : ''}${escapeHtml(t.title || '(без названия)')}</span>`).join('');
   return `<div class="day-preview">${rows}${tasks.length > 3 ? `<span>+ ещё ${tasks.length - 3}</span>` : ''}</div>`;
 }
+
 function renderSelectedDay() {
   const day = state.days.find((d) => d.id === state.selectedDayId);
   if (!day) {
@@ -152,9 +175,17 @@ function renderSelectedDay() {
   el.selectedCityBadge.innerHTML = `${CITY_ICON[day.city]} ${day.city}`;
   el.dayHeader.innerHTML = `<b>${day.dateLabel} · ${escapeHtml(day.title)}</b><div class="muted">Перетаскивайте задачи между днями (drag&drop).</div>`;
 
+  if (state.dayView === 'timeline') {
+    renderHourTimeline(day);
+    return;
+  }
+
   const sorted = [...day.tasks].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   el.tasks.innerHTML = '';
-  if (!sorted.length) { el.tasks.innerHTML = '<div class="task muted">Пока задач нет. Нажмите «Добавить».</div>'; return; }
+  if (!sorted.length) {
+    el.tasks.innerHTML = '<div class="task muted">Пока задач нет. Нажмите «Добавить».</div>';
+    return;
+  }
 
   sorted.forEach((task) => {
     const node = document.createElement('div');
@@ -162,47 +193,56 @@ function renderSelectedDay() {
     node.draggable = true;
     node.ondragstart = (e) => { node.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ fromDayId: day.id, taskId: task.id })); };
     node.ondragend = () => node.classList.remove('dragging');
-    node.innerHTML = `<div class="task-grid"><input type="time" value="${escapeAttr(task.time || '')}" /><input type="text" placeholder="Задача" value="${escapeAttr(task.title || '')}" /><div><input type="text" placeholder="Тег" value="${escapeAttr(task.tag || '')}" /><button class="btn stretch">Удалить</button></div></div>${state.showNotes ? `<textarea placeholder="Заметки / билеты / станции / ссылки">${escapeHtml(task.notes || '')}</textarea>` : ''}<div class="task-foot">Перетаскивание: возьмите карточку и бросьте на другой день в ленте.</div>`;
+    node.innerHTML = `<div class="task-grid"><input type="time" value="${escapeAttr(task.time || '')}" /><input type="text" placeholder="Задача" value="${escapeAttr(task.title || '')}" /><input type="text" placeholder="Google Maps URL" value="${escapeAttr(task.mapUrl || '')}" /><div><input type="text" placeholder="Тег" value="${escapeAttr(task.tag || '')}" /><button class="btn stretch">Удалить</button></div></div>${state.showNotes ? `<textarea placeholder="Заметки / билеты / станции / ссылки">${escapeHtml(task.notes || '')}</textarea>` : ''}<div class="task-foot">Перетаскивание: возьмите карточку и бросьте на другой день в ленте. ${task.mapUrl ? `<a href="${escapeAttr(task.mapUrl)}" target="_blank" rel="noreferrer" class="map-link">📍 Карта</a>` : ''}</div>`;
 
-    const [timeInput, titleInput, tagInput, delBtn] = node.querySelectorAll('input, button');
+    const [timeInput, titleInput, mapInput, tagInput, delBtn] = node.querySelectorAll('input, button');
     const notes = node.querySelector('textarea');
     timeInput.oninput = () => updateTask(day.id, task.id, { time: timeInput.value });
     titleInput.oninput = () => updateTask(day.id, task.id, { title: titleInput.value });
+    mapInput.oninput = () => updateTask(day.id, task.id, { mapUrl: mapInput.value });
     tagInput.oninput = () => updateTask(day.id, task.id, { tag: tagInput.value });
     if (notes) notes.oninput = () => updateTask(day.id, task.id, { notes: notes.value });
-    delBtn.onclick = () => mutateDay(day.id, (d) => (d.tasks = d.tasks.filter((t) => t.id !== task.id)));
+    delBtn.onclick = () => applyChange('Удалена задача', () => {
+      const d = state.days.find((x) => x.id === day.id);
+      d.tasks = d.tasks.filter((t) => t.id !== task.id);
+    });
+
     el.tasks.appendChild(node);
   });
 }
+
+function renderHourTimeline(day) {
+  const slots = [];
+  for (let h = 6; h <= 23; h += 1) slots.push(`${String(h).padStart(2, '0')}:00`);
+  const tasks = [...day.tasks];
+  el.tasks.innerHTML = `<div class="hour-timeline">${slots.map((slot) => {
+    const h = parseInt(slot.slice(0, 2), 10);
+    const inHour = tasks.filter((t) => {
+      const m = (t.time || '').match(/^(\d{2}):(\d{2})$/);
+      return m && Number(m[1]) === h;
+    });
+    return `<div class="hour-row"><div class="hour-label">${slot}</div><div class="hour-content">${inHour.length ? inHour.map((t) => `<div class="hour-task"><b>${escapeHtml(t.title || '(без названия)')}</b>${t.time ? ` · ${t.time}` : ''}${t.mapUrl ? ` · <a href="${escapeAttr(t.mapUrl)}" target="_blank" rel="noreferrer">Карта</a>` : ''}</div>`).join('') : ''}</div></div>`;
+  }).join('')}</div>`;
+}
+
 function renderTabs() {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === state.activeTab));
   if (state.activeTab === 'moves') el.tabContent.innerHTML = `<div class="note"><b>Осака → Токио</b><br>Ночной автобус 09.09 21:00 → 10.09 07:00. Утро 10.09 лучше сделать лёгким.</div><div class="note"><b>Дейтрипы из Осаки</b><br>Нара — 1 день. Киото — 2–3 дня. Можно добавить 1 ночёвку в Киото.</div>`;
   else if (state.activeTab === 'tickets') el.tabContent.innerHTML = `<div class="note"><b>Перелёт туда</b><br>31.08 21:05 LED → 01.09 18:00 KIX.</div><div class="note"><b>Перелёт обратно</b><br>16.09 08:40 HND (T3) → 16.09 19:05 LED.</div>`;
   else el.tabContent.innerHTML = `<div class="note"><b>Что заранее</b><br>TeamLab/музеи, места в ночном автобусе, IC-карта (ICOCA/Suica).</div><div class="note"><b>Как работать с планом</b><br>Выберите день → добавьте задачи → переносите drag&drop → экспортируйте JSON.</div>`;
 }
+
 function renderSettingsDays() {
   el.settingsDays.innerHTML = '';
   state.days.forEach((d, i) => {
     const item = document.createElement('div');
     item.className = 'settings-item';
-    item.innerHTML = `
-      <div class="top"><span>День ${i + 1} · ${d.dateLabel}</span><span>${CITY_ICON[d.city]} ${d.city}</span></div>
-      <div class="settings-row">
-        <input type="text" value="${escapeAttr(d.dateLabel)}" placeholder="Дата (например 17.09)" />
-        <select>${Object.values(CITY).map((c) => `<option value="${escapeAttr(c)}" ${c === d.city ? 'selected' : ''}>${CITY_ICON[c]} ${c}</option>`).join('')}</select>
-      </div>
-      <input type="text" value="${escapeAttr(d.title)}" placeholder="Заголовок дня" />
-      <div class="settings-actions">
-        <button class="btn">⬆️ Вверх</button>
-        <button class="btn">⬇️ Вниз</button>
-        <button class="btn">🗑 Удалить</button>
-      </div>
-    `;
+    item.innerHTML = `<div class="top"><span>День ${i + 1} · ${d.dateLabel}</span><span>${CITY_ICON[d.city]} ${d.city}</span></div><div class="settings-row"><input type="text" value="${escapeAttr(d.dateLabel)}" placeholder="Дата (например 17.09)" /><select>${Object.values(CITY).map((c) => `<option value="${escapeAttr(c)}" ${c === d.city ? 'selected' : ''}>${CITY_ICON[c]} ${c}</option>`).join('')}</select></div><input type="text" value="${escapeAttr(d.title)}" placeholder="Заголовок дня" /><div class="settings-actions"><button class="btn">⬆️ Вверх</button><button class="btn">⬇️ Вниз</button><button class="btn">🗑 Удалить</button></div>`;
 
     const [dateInput, citySelect, titleInput, upBtn, downBtn, delBtn] = item.querySelectorAll('input, select, button');
-    dateInput.oninput = () => mutateDay(d.id, (day) => (day.dateLabel = dateInput.value || day.dateLabel));
-    citySelect.onchange = () => mutateDay(d.id, (day) => (day.city = citySelect.value));
-    titleInput.oninput = () => mutateDay(d.id, (day) => (day.title = titleInput.value));
+    dateInput.onchange = () => applyChange('Изменена дата дня', () => { const day = getDay(d.id); day.dateLabel = dateInput.value || day.dateLabel; });
+    citySelect.onchange = () => applyChange('Изменен город дня', () => { const day = getDay(d.id); day.city = citySelect.value; });
+    titleInput.onchange = () => applyChange('Изменен заголовок дня', () => { const day = getDay(d.id); day.title = titleInput.value; });
 
     upBtn.onclick = () => moveDay(i, i - 1);
     downBtn.onclick = () => moveDay(i, i + 1);
@@ -212,45 +252,95 @@ function renderSettingsDays() {
   });
 }
 
+function renderActivityLog() {
+  if (!state.activityLog.length) {
+    el.activityLog.innerHTML = '<div class="activity-item muted">Пока действий нет.</div>';
+    return;
+  }
+  el.activityLog.innerHTML = [...state.activityLog].reverse().map((a) => `<div class="activity-item"><span class="activity-time">${a.time}</span>${escapeHtml(a.text)}</div>`).join('');
+}
+
+function applyChange(label, mutator) {
+  undoStack.push(snapshotState());
+  if (undoStack.length > 120) undoStack.shift();
+  redoStack.length = 0;
+  mutator();
+  addActivity(label);
+  save();
+  render();
+  pushSync();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshotState());
+  restoreSnapshot(undoStack.pop());
+  addActivity('Undo');
+  save();
+  render();
+  pushSync();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(snapshotState());
+  restoreSnapshot(redoStack.pop());
+  addActivity('Redo');
+  save();
+  render();
+  pushSync();
+}
+
+function addActivity(text) {
+  state.activityLog.push({ time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), text });
+  if (state.activityLog.length > 120) state.activityLog.shift();
+}
+
 function moveDay(fromIdx, toIdx) {
   if (toIdx < 0 || toIdx >= state.days.length) return;
-  const [day] = state.days.splice(fromIdx, 1);
-  state.days.splice(toIdx, 0, day);
-  save(); render(); pushSync();
+  applyChange('Перемещен день', () => {
+    const [day] = state.days.splice(fromIdx, 1);
+    state.days.splice(toIdx, 0, day);
+  });
 }
 
 function removeDay(dayId) {
   if (state.days.length <= 1) return;
-  const idx = state.days.findIndex((d) => d.id === dayId);
-  if (idx < 0) return;
-  state.days.splice(idx, 1);
-  if (state.selectedDayId === dayId) state.selectedDayId = state.days[Math.max(0, idx - 1)]?.id || state.days[0]?.id;
-  save(); render(); pushSync();
+  applyChange('Удален день', () => {
+    const idx = state.days.findIndex((d) => d.id === dayId);
+    if (idx < 0) return;
+    state.days.splice(idx, 1);
+    if (state.selectedDayId === dayId) state.selectedDayId = state.days[Math.max(0, idx - 1)]?.id || state.days[0]?.id;
+  });
 }
 
 function moveTask(fromDayId, toDayId, taskId) {
   if (fromDayId === toDayId) return;
-  const from = state.days.find((d) => d.id === fromDayId), to = state.days.find((d) => d.id === toDayId);
-  if (!from || !to) return;
-  const idx = from.tasks.findIndex((t) => t.id === taskId);
-  if (idx < 0) return;
-  const [task] = from.tasks.splice(idx, 1);
-  to.tasks.push(task);
-  save(); render(); pushSync();
+  applyChange('Перенос задачи между днями', () => {
+    const from = state.days.find((d) => d.id === fromDayId), to = state.days.find((d) => d.id === toDayId);
+    if (!from || !to) return;
+    const idx = from.tasks.findIndex((t) => t.id === taskId);
+    if (idx < 0) return;
+    const [task] = from.tasks.splice(idx, 1);
+    to.tasks.push(task);
+  });
 }
+
 function updateTask(dayId, taskId, patch) {
-  mutateDay(dayId, (day) => { day.tasks = day.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)); }, false);
-}
-function mutateDay(dayId, mutator, rerender = true) {
   const day = state.days.find((d) => d.id === dayId);
   if (!day) return;
-  mutator(day);
+  day.tasks = day.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t));
   save();
-  if (rerender) render();
+  renderSelectedDay();
+  renderTimeline();
   pushSync();
 }
+
 function patchState(patch) { Object.assign(state, patch); save(); render(); }
 function openModal(modal, show) { modal.classList.toggle('hidden', !show); }
+function getDay(id) { return state.days.find((d) => d.id === id); }
+function snapshotState() { return JSON.stringify({ ...state, activityLog: [...state.activityLog] }); }
+function restoreSnapshot(snapshot) { Object.assign(state, JSON.parse(snapshot)); applyTheme(); }
 
 async function connectSync(silent = false) {
   try {
@@ -336,6 +426,7 @@ function exportJSON() {
   a.href = url; a.download = 'japan-trip-planner.json'; a.click();
   URL.revokeObjectURL(url);
 }
+
 function importJSON(e) {
   const f = e.target.files?.[0];
   if (!f) return;
@@ -343,9 +434,13 @@ function importJSON(e) {
   reader.onload = () => {
     const parsed = parseJSON(String(reader.result));
     if (!parsed?.days?.length) return;
+    undoStack.push(snapshotState());
     Object.assign(state, parsed);
     if (!state.selectedDayId) state.selectedDayId = state.days[0]?.id;
     if (!state.theme) state.theme = 'light';
+    if (!state.dayView) state.dayView = 'list';
+    if (!Array.isArray(state.activityLog)) state.activityLog = [];
+    addActivity('Импортирован JSON');
     applyTheme();
     save(); render(); pushSync();
   };
@@ -376,15 +471,16 @@ function makeDefaultDays() {
   ];
   return data.map(([dateLabel, title, city], idx) => ({ id: uid(), dateLabel, title, city, tasks: seedTasks(idx) }));
 }
+
 function seedTasks(i) {
-  if (i === 1) return [makeTask('19:30', 'Дорога KIX → Нанба', 'Nankai / Limousine Bus', 'логистика'), makeTask('21:00', 'Дотонбори — лёгкая прогулка', 'без плотного плана', 'вечер')];
-  if (i === 2) return [makeTask('09:00', 'Osaka Castle', 'музей внутри', 'must'), makeTask('18:00', 'Umeda Sky Building', 'закат/ночной вид', 'view')];
+  if (i === 1) return [makeTask('19:30', 'Дорога KIX → Нанба', 'Nankai / Limousine Bus', 'логистика', 'https://maps.google.com/?q=Namba+Station'), makeTask('21:00', 'Дотонбори — лёгкая прогулка', 'без плотного плана', 'вечер', 'https://maps.google.com/?q=Dotonbori')];
+  if (i === 2) return [makeTask('09:00', 'Osaka Castle', 'музей внутри', 'must', 'https://maps.google.com/?q=Osaka+Castle'), makeTask('18:00', 'Umeda Sky Building', 'закат/ночной вид', 'view', 'https://maps.google.com/?q=Umeda+Sky+Building')];
   if (i === 9) return [makeTask('21:00', 'Ночной автобус Осака → Токио', 'прибытие ~07:00', 'логистика')];
-  if (i === 16) return [makeTask('05:45', 'Выезд в HND', 'запас времени', 'логистика')];
+  if (i === 16) return [makeTask('05:45', 'Выезд в HND', 'запас времени', 'логистика', 'https://maps.google.com/?q=Haneda+Airport')];
   return [];
 }
-function makeTask(time = '', title = '', notes = '', tag = '') { return { id: uid(), time, title, notes, tag }; }
 
+function makeTask(time = '', title = '', notes = '', tag = '', mapUrl = '') { return { id: uid(), time, title, notes, tag, mapUrl }; }
 function byId(id) { return document.getElementById(id); }
 function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
 function parseJSON(s) { try { return JSON.parse(s); } catch { return null; } }

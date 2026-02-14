@@ -42,6 +42,7 @@
             <h2>Задачи дня</h2>
             <div class="panel-top-right">
               <span id="selectedCityBadge" class="badge badge-soft"></span>
+              <button id="viewModeBtn" class="btn">Таймлайн по часам</button>
               <button id="addTaskBtn" class="btn btn-main">+ Добавить</button>
             </div>
           </div>
@@ -61,8 +62,21 @@
         </aside>
       </main>
 
+      <section class="card">
+        <div class="panel-top">
+          <h2>История изменений</h2>
+          <div class="panel-top-right">
+            <button id="undoBtn" class="btn">↶ Undo</button>
+            <button id="redoBtn" class="btn">↷ Redo</button>
+          </div>
+        </div>
+        <div id="activityLog" class="activity-log"></div>
+      </section>
+
       <p class="hint">Подсказка: перетаскивайте карточки задач между днями через верхнюю ленту.</p>
     </div>
+
+    <button id="backToTop" class="back-to-top" aria-label="Наверх">↑</button>
 
     <div id="settingsModal" class="modal hidden">
       <div class="modal-backdrop"></div>
