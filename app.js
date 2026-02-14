@@ -1,289 +1,178 @@
-const CITY = { OSAKA:'Осака', KYOTO:'Киото', NARA:'Нара', TOKYO:'Токио', BUS:'Ночной автобус', FLIGHT:'Перелёт' };
-const CITY_ICON = { [CITY.OSAKA]:'🏮',[CITY.KYOTO]:'⛩️',[CITY.NARA]:'🦌',[CITY.TOKYO]:'🗼',[CITY.BUS]:'🚌',[CITY.FLIGHT]:'✈️' };
-const CITY_CLASS = { [CITY.OSAKA]:'city-osaka',[CITY.KYOTO]:'city-kyoto',[CITY.NARA]:'city-nara',[CITY.TOKYO]:'city-tokyo',[CITY.BUS]:'city-bus',[CITY.FLIGHT]:'city-flight' };
-const WALLS = ['original','retro','aero','anime','techno'];
+const STORE_KEY='jp_planner_v7';
+const CITY={OSAKA:'Осака',KYOTO:'Киото',NARA:'Нара',TOKYO:'Токио',BUS:'Ночной автобус',FLIGHT:'Перелёт'};
+const ICON={Осака:'🏮',Киото:'⛩️',Нара:'🦌',Токио:'🗼','Ночной автобус':'🚌','Перелёт':'✈️'};
+const STATIONS=[
+  {name:'Наше Радио',url:'https://nashe1.hostingradio.ru/nashe-256',emoji:'🎸'},
+  {name:'Радио Шансон',url:'https://chanson.hostingradio.ru:8041/chanson256.mp3',emoji:'🎤'},
+  {name:'Радио Ваня',url:'https://radiovanya.hostingradio.ru:8000/radiovanya',emoji:'😎'},
+  {name:'Радио 21',url:'https://pub0302.101.ru:8443/stream/air/mp3/256/219',emoji:'🛰️'},
+  {name:'Радио Дача',url:'https://pub0301.101.ru:8443/stream/air/mp3/256/199',emoji:'🌼'},
+  {name:'Дорожное',url:'https://dor2server.streamr.ru:8000/dorognoe',emoji:'🚗'},
+  {name:'Радио Рекорд',url:'https://pub0302.101.ru:8443/stream/trust_128',emoji:'🔥'},
+  {name:'Europa Plus',url:'https://emgregion.hostingradio.ru:8064/moscow.europaplus.mp3',emoji:'✨'}
+];
 
-const STORE_KEY = 'jp_planner_v6';
-const SYNC_KEY = 'jp_planner_sync_cfg';
-const clientId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
-const undoStack = [];
-const redoStack = [];
+const state=JSON.parse(localStorage.getItem(STORE_KEY)||'null')||{theme:'light',compact:false,search:'',dayView:'list',selectedDayId:null,days:seedDays(),comments:[],activity:[],wall:'original',customWall:'',notifSound:true,zombieStart:Date.now(),stationIndex:0};
+if(!state.selectedDayId) state.selectedDayId=state.days[0].id;
 
-const state = load() || {
-  compact:false, showNotes:true, search:'', activeTab:'moves', theme:'light', dayView:'list', wallpaper:'original', customWallpaper:'',
-  selectedDayId:null, days:makeDefaultDays(), activityLog: [], comments: []
-};
-if (!state.selectedDayId) state.selectedDayId = state.days[0]?.id || null;
-if (!Array.isArray(state.activityLog)) state.activityLog = [];
-if (!Array.isArray(state.comments)) state.comments = [];
-
-const syncState = { config:loadSyncConfig(), connected:false, app:null, db:null, ref:null, unsub:null, mutePush:false, lastRemoteTs:0 };
-
-const el = {
-  themeToggle: byId('themeToggle'), viewModeBtn: byId('viewModeBtn'), undoBtn: byId('undoBtn'), redoBtn: byId('redoBtn'), activityLog: byId('activityLog'),
-  backToTop: byId('backToTop'), overallRating: byId('overallRating'), commentName: byId('commentName'), commentRating: byId('commentRating'),
-  commentText: byId('commentText'), addCommentBtn: byId('addCommentBtn'), commentList: byId('commentList'), wallpaperBtns: byId('wallpaperBtns'), wallpaperUpload: byId('wallpaperUpload'),
-  clockMsk: byId('clockMsk'), clockJst: byId('clockJst'), timeMsk: byId('timeMsk'), timeJst: byId('timeJst'), radioSelect: byId('radioSelect'), radioPlayer: byId('radioPlayer'),
-  sideAd: byId('sideAd'), bottomAd: byId('bottomAd'), fullscreenNudge: byId('fullscreenNudge'), closeNudge: byId('closeNudge'),
-  compact: byId('compact'), showNotes: byId('showNotes'), search: byId('search'), exportBtn: byId('exportBtn'), importInput: byId('importInput'),
-  settingsBtn: byId('settingsBtn'), summary: byId('summary'), timeline: byId('timeline'), selectedCityBadge: byId('selectedCityBadge'), addTaskBtn: byId('addTaskBtn'),
-  dayHeader: byId('dayHeader'), tasks: byId('tasks'), tabContent: byId('tabContent'), settingsModal: byId('settingsModal'), closeSettings: byId('closeSettings'),
-  settingsDays: byId('settingsDays'), addDayBtn: byId('addDayBtn'), resetBtn: byId('resetBtn'), kyotoNightBtn: byId('kyotoNightBtn'), syncBtn: byId('syncBtn'),
-  syncModal: byId('syncModal'), closeSync: byId('closeSync'), fbApiKey: byId('fbApiKey'), fbAuthDomain: byId('fbAuthDomain'), fbDbUrl: byId('fbDbUrl'),
-  fbProjectId: byId('fbProjectId'), fbAppId: byId('fbAppId'), fbPath: byId('fbPath'), connectSync: byId('connectSync'), disconnectSync: byId('disconnectSync'), syncStatus: byId('syncStatus')
+const undoStack=[],redoStack=[];
+const el={
+  themeToggle:id('themeToggle'),compact:id('compact'),search:id('search'),exportBtn:id('exportBtn'),importInput:id('importInput'),
+  timeline:id('timeline'),tasks:id('tasks'),dayHeader:id('dayHeader'),addTaskBtn:id('addTaskBtn'),viewModeBtn:id('viewModeBtn'),
+  overallRating:id('overallRating'),commentName:id('commentName'),commentRating:id('commentRating'),commentText:id('commentText'),addCommentBtn:id('addCommentBtn'),commentList:id('commentList'),
+  backToTop:id('backToTop'),activityLog:id('activityLog'),onlineCount:id('onlineCount'),notifStack:id('notifStack'),notifSoundBtn:id('notifSoundBtn'),
+  zombieProgress:id('zombieProgress'),zombieText:id('zombieText'),
+  stationName:id('stationName'),stationArt:id('stationArt'),radioSelect:id('radioSelect'),radioPlayer:id('radioPlayer'),playPause:id('playPause'),prevStation:id('prevStation'),nextStation:id('nextStation'),volumeRange:id('volumeRange'),eqCanvas:id('eqCanvas'),
+  clockMsk:id('clockMsk'),clockJst:id('clockJst'),timeMsk:id('timeMsk'),timeJst:id('timeJst'),compass:id('compass'),geoText:id('geoText'),
+  sideAd:id('sideAd'),bottomAd:id('bottomAd'),fullscreenNudge:id('fullscreenNudge'),closeNudge:id('closeNudge'),
+  wallpaperBtns:id('wallpaperBtns'),wallpaperUpload:id('wallpaperUpload'),
+  geigerValue:id('geigerValue'),geigerBar:id('geigerBar').querySelector('span'),
+  snowLayer:id('snowLayer'),emojiLayer:id('emojiLayer')
 };
 
 init();
-
-function init() {
-  applyTheme();
-  applyWallpaper();
-  renderWallpaperButtons();
-
-  el.themeToggle.checked = state.theme === 'dark';
-  el.compact.checked = state.compact;
-  el.showNotes.checked = state.showNotes;
-  el.search.value = state.search;
-
-  el.themeToggle.onchange = () => applyChange('Переключение темы', () => { state.theme = el.themeToggle.checked ? 'dark' : 'light'; applyTheme(); });
-  el.viewModeBtn.onclick = () => { state.dayView = state.dayView === 'list' ? 'timeline' : 'list'; save(); renderSelectedDay(); updateViewModeBtn(); };
-  el.compact.onchange = () => patchState({ compact: el.compact.checked });
-  el.showNotes.onchange = () => patchState({ showNotes: el.showNotes.checked });
-  el.search.oninput = () => patchState({ search: el.search.value });
-  el.exportBtn.onclick = exportJSON;
-  el.importInput.onchange = importJSON;
-  el.addTaskBtn.onclick = () => state.selectedDayId && applyChange('Добавлена задача', () => getDay(state.selectedDayId)?.tasks.push(makeTask()));
-  el.undoBtn.onclick = undo;
-  el.redoBtn.onclick = redo;
-
-  el.addCommentBtn.onclick = addComment;
-  el.wallpaperUpload.onchange = uploadWallpaper;
-
-  el.radioPlayer.src = el.radioSelect.value;
-  el.radioSelect.onchange = () => { el.radioPlayer.src = el.radioSelect.value; el.radioPlayer.play().catch(()=>{}); };
-
-  el.settingsBtn.onclick = () => openModal(el.settingsModal, true);
-  el.closeSettings.onclick = () => openModal(el.settingsModal, false);
-  el.settingsModal.querySelector('.modal-backdrop').onclick = () => openModal(el.settingsModal, false);
-  el.syncBtn.onclick = () => openModal(el.syncModal, true);
-  el.closeSync.onclick = () => openModal(el.syncModal, false);
-  el.syncModal.querySelector('.modal-backdrop').onclick = () => openModal(el.syncModal, false);
-  document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => { state.activeTab = tab.dataset.tab; save(); renderTabs(); });
-
-  el.addDayBtn.onclick = () => applyChange('Добавлен новый день', () => { const nd={id:uid(),dateLabel:nextDateLabel(),title:'Новый день',city:CITY.OSAKA,tasks:[]}; state.days.push(nd); state.selectedDayId=nd.id; });
-  el.resetBtn.onclick = () => applyChange('Сброс к базовому плану', () => { state.days = makeDefaultDays(); state.selectedDayId = state.days[0]?.id || null; });
-  el.kyotoNightBtn.onclick = () => applyChange('Добавлена ночёвка в Киото', () => { const t = state.days.find((d)=>d.title.includes('свободный')&&d.city===CITY.OSAKA); if(t){t.city=CITY.KYOTO;t.title='Киото (ночёвка)';} });
-
-  el.connectSync.onclick = connectSync;
-  el.disconnectSync.onclick = disconnectSync;
-  fillSyncForm();
-  renderSyncStatus('Sync не подключен');
-
-  window.addEventListener('scroll', onScroll);
-  el.backToTop.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
-  document.querySelectorAll('.ad-close').forEach((b)=>b.onclick=()=>closeAd(b.dataset.ad));
-  el.closeNudge.onclick = () => el.fullscreenNudge.classList.add('hidden');
-
-  setInterval(drawClocks, 1000);
-  drawClocks();
-  startAdTimers();
-
-  render();
-  if (syncState.config?.apiKey) connectSync(true);
+function init(){
+  applyTheme(); applyWall();
+  el.themeToggle.checked=state.theme==='dark'; el.compact.checked=state.compact; el.search.value=state.search;
+  wire(); render();
+  setInterval(drawClocks,1000); drawClocks();
+  setInterval(updateOnline,2200); updateOnline();
+  setInterval(pushNotification,5000);
+  setInterval(updateZombie,1000); updateZombie();
+  setInterval(()=>el.fullscreenNudge.classList.remove('hidden'),300000);
+  setInterval(()=>{el.sideAd.classList.remove('hidden');el.bottomAd.classList.remove('hidden');},60000);
+  setInterval(updateGeiger,900); updateGeiger();
+  startSnow(); startEmojiReactions(); startEq(); initCompass();
+}
+function wire(){
+  el.themeToggle.onchange=()=>change('Тема',()=>{state.theme=el.themeToggle.checked?'dark':'light';applyTheme();});
+  el.compact.onchange=()=>{state.compact=el.compact.checked;save();renderTimeline();};
+  el.search.oninput=()=>{state.search=el.search.value;save();renderTimeline();};
+  el.exportBtn.onclick=exp; el.importInput.onchange=imp;
+  el.addTaskBtn.onclick=()=>change('Добавлена задача',()=>{day().tasks.push({id:uid(),time:'',title:'',tag:'',notes:'',mapUrl:''});});
+  el.viewModeBtn.onclick=()=>{state.dayView=state.dayView==='list'?'timeline':'list';save();renderSelectedDay();};
+  el.addCommentBtn.onclick=addComment;
+  el.backToTop.onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
+  window.addEventListener('scroll',()=>el.backToTop.classList.toggle('show',window.scrollY>380));
+  document.querySelectorAll('.ad-close').forEach((b)=>{ b.onmouseenter=()=>geigerSpike(); b.onclick=()=>closeAdWithMath(b.dataset.ad); });
+  el.closeNudge.onclick=()=>el.fullscreenNudge.classList.add('hidden');
+  el.notifSoundBtn.onclick=()=>{state.notifSound=!state.notifSound;save();el.notifSoundBtn.textContent=state.notifSound?'🔊 Звук уведомлений':'🔇 Звук уведомлений';};
+  initRadio(); initWalls();
 }
 
-function onScroll(){ el.backToTop.classList.toggle('show', window.scrollY > 380); }
-function updateViewModeBtn(){ el.viewModeBtn.textContent = state.dayView === 'list' ? 'Таймлайн по часам' : 'Режим карточек'; }
-function applyTheme(){ document.body.setAttribute('data-theme', state.theme === 'dark' ? 'dark' : 'light'); }
-function applyWallpaper(){ document.body.setAttribute('data-wall', state.wallpaper || 'original'); if(state.customWallpaper && state.wallpaper==='custom'){ document.body.style.backgroundImage = `url(${state.customWallpaper})`; } else { document.body.style.backgroundImage=''; }}
-
-function render(){ renderSummary(); renderTimeline(); renderSelectedDay(); renderTabs(); renderSettingsDays(); renderActivityLog(); renderComments(); renderOverallRating(); updateViewModeBtn(); }
-
-function renderWallpaperButtons(){
-  el.wallpaperBtns.innerHTML = '';
-  const labels = { original:'Оригинальный', retro:'Ретро стиль', aero:'Aero стиль', anime:'Аниме', techno:'Крутой стиль техно' };
-  WALLS.forEach((w)=>{
-    const b=document.createElement('button'); b.className='btn wall-btn'; b.textContent=labels[w];
-    b.onclick=()=>applyChange('Смена обоев',()=>{state.wallpaper=w; applyWallpaper();});
-    el.wallpaperBtns.appendChild(b);
-  });
-}
-
-function uploadWallpaper(e){
-  const f = e.target.files?.[0]; if(!f) return;
-  const r=new FileReader();
-  r.onload=()=>applyChange('Загружены пользовательские обои',()=>{state.customWallpaper=String(r.result); state.wallpaper='custom'; applyWallpaper();});
-  r.readAsDataURL(f); e.target.value='';
-}
-
-function drawClocks(){
-  const now = new Date();
-  const msk = new Date(now.toLocaleString('en-US',{timeZone:'Europe/Moscow'}));
-  const jst = new Date(now.toLocaleString('en-US',{timeZone:'Asia/Tokyo'}));
-  drawClockOnCanvas(el.clockMsk, msk); drawClockOnCanvas(el.clockJst, jst);
-  el.timeMsk.textContent = msk.toLocaleTimeString('ru-RU');
-  el.timeJst.textContent = jst.toLocaleTimeString('ru-RU');
-}
-function drawClockOnCanvas(canvas,date){
-  const ctx=canvas.getContext('2d'); const w=canvas.width; const c=w/2; ctx.clearRect(0,0,w,w);
-  ctx.beginPath(); ctx.arc(c,c,c-6,0,Math.PI*2); ctx.fillStyle='rgba(255,255,255,.25)'; ctx.fill(); ctx.strokeStyle='rgba(120,140,180,.6)'; ctx.stroke();
-  for(let i=0;i<12;i++){ const a=i*Math.PI/6; ctx.beginPath(); ctx.moveTo(c+Math.cos(a)*(c-18),c+Math.sin(a)*(c-18)); ctx.lineTo(c+Math.cos(a)*(c-10),c+Math.sin(a)*(c-10)); ctx.stroke(); }
-  const h=date.getHours()%12,m=date.getMinutes(),s=date.getSeconds();
-  hand(ctx,c,(h+m/60)*Math.PI/6-Math.PI/2,c-34,4); hand(ctx,c,(m+s/60)*Math.PI/30-Math.PI/2,c-22,3); hand(ctx,c,s*Math.PI/30-Math.PI/2,c-18,1.5,'#ef4444');
-}
-function hand(ctx,c,a,len,w,color){ ctx.beginPath(); ctx.moveTo(c,c); ctx.lineTo(c+Math.cos(a)*len,c+Math.sin(a)*len); ctx.lineWidth=w; ctx.strokeStyle=color||'#111'; ctx.stroke(); }
-
-function startAdTimers(){
-  showAds();
-  setInterval(()=>showAds(), 60000);
-  setInterval(()=>{ el.fullscreenNudge.classList.remove('hidden'); }, 300000);
-}
-function showAds(){ el.sideAd.classList.remove('hidden'); el.bottomAd.classList.remove('hidden'); }
-function closeAd(type){ if(type==='side') el.sideAd.classList.add('hidden'); if(type==='bottom') el.bottomAd.classList.add('hidden'); setTimeout(showAds,60000); }
-
-function renderSummary(){
-  const map = new Map(); state.days.forEach((d)=>map.set(d.city,(map.get(d.city)||0)+1));
-  el.summary.innerHTML = [...map.entries()].map(([city,c])=>`<span class='badge'>${CITY_ICON[city]} ${city}: ${c}</span>`).join('');
-}
+function render(){ renderTimeline(); renderSelectedDay(); renderComments(); renderRating(); renderActivity(); el.notifSoundBtn.textContent=state.notifSound?'🔊 Звук уведомлений':'🔇 Звук уведомлений'; }
 function renderTimeline(){
   const q=state.search.trim().toLowerCase();
-  const days=state.days.filter((d)=>!q || `${d.dateLabel} ${d.title} ${d.city}`.toLowerCase().includes(q) || d.tasks.some((t)=>`${t.time} ${t.title} ${t.notes} ${t.tag} ${t.mapUrl||''}`.toLowerCase().includes(q)));
+  const days=state.days.filter(d=>!q||`${d.dateLabel} ${d.title} ${d.city}`.toLowerCase().includes(q));
   el.timeline.innerHTML='';
-  days.forEach((d,i)=>{ const card=document.createElement('button'); card.className=`day-card ${CITY_CLASS[d.city]} ${d.id===state.selectedDayId?'selected':''}`;
-    card.innerHTML=`<div class='day-top'><span>День ${i+1}</span><span>${d.tasks.length} задач</span></div><div class='day-date'>${d.dateLabel}</div><span class='badge'>${CITY_ICON[d.city]} ${d.city}</span><div class='day-title'>${esc(d.title)}</div>${state.compact?'':preview(d.tasks)}`;
-    card.onclick=()=>patchState({selectedDayId:d.id});
-    card.ondragover=(e)=>{e.preventDefault();};
-    card.ondrop=(e)=>{e.preventDefault();const p=parseJSON(e.dataTransfer.getData('text/plain')); if(p?.taskId && p?.fromDayId) moveTask(p.fromDayId,d.id,p.taskId);};
-    el.timeline.appendChild(card);
+  days.forEach((d,i)=>{const c=document.createElement('button'); c.className=`day-card ${d.id===state.selectedDayId?'selected':''}`;
+    c.innerHTML=`<div class='day-top'><span>День ${i+1}</span><span>${d.tasks.length}</span></div><div class='day-date'>${d.dateLabel}</div><div>${ICON[d.city]} ${d.city}</div><div class='day-title'>${esc(d.title)}</div>${state.compact?'':`<div class='day-preview'>${d.tasks.slice(0,2).map(t=>`<span>${t.time||''} ${esc(t.title||'')}</span>`).join('')}</div>`}`;
+    c.onclick=()=>{state.selectedDayId=d.id;save();renderSelectedDay();renderTimeline();};
+    c.ondragover=(e)=>e.preventDefault();
+    c.ondrop=(e)=>{e.preventDefault();const p=JSON.parse(e.dataTransfer.getData('text/plain')||'{}'); if(p.taskId) moveTask(p.fromDayId,d.id,p.taskId);};
+    el.timeline.appendChild(c);
   });
 }
-function preview(tasks){ if(!tasks.length) return `<div class='day-preview'>Нет задач</div>`; return `<div class='day-preview'>${tasks.slice(0,3).map((t)=>`<span>${t.time?`${t.time} · `:''}${esc(t.title||'(без названия)')}</span>`).join('')}</div>`; }
-
 function renderSelectedDay(){
-  const day=getDay(state.selectedDayId);
-  if(!day){ el.dayHeader.textContent='Выберите день в ленте сверху.'; el.tasks.innerHTML=''; return; }
-  el.selectedCityBadge.textContent=`${CITY_ICON[day.city]} ${day.city}`;
-  el.dayHeader.innerHTML=`<b>${day.dateLabel} · ${esc(day.title)}</b><div class='muted'>Перетаскивайте задачи между днями.</div>`;
-  if(state.dayView==='timeline') return renderHourTimeline(day);
-  const sorted=[...day.tasks].sort((a,b)=>(a.time||'').localeCompare(b.time||''));
-  if(!sorted.length){ el.tasks.innerHTML=`<div class='task muted'>Пока задач нет. Нажмите «Добавить».</div>`; return; }
+  const d=day(); if(!d){el.dayHeader.textContent='Выберите день'; return;}
+  el.dayHeader.innerHTML=`<b>${d.dateLabel} · ${esc(d.title)}</b> <span class='muted'>${ICON[d.city]} ${d.city}</span>`;
+  if(state.dayView==='timeline') return renderHour(d);
+  const arr=[...d.tasks].sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+  if(!arr.length){el.tasks.innerHTML=`<div class='task muted'>Нет задач</div>`;return;}
   el.tasks.innerHTML='';
-  sorted.forEach((task)=>{
-    const node=document.createElement('div'); node.className='task'; node.draggable=true;
-    node.ondragstart=(e)=>e.dataTransfer.setData('text/plain',JSON.stringify({fromDayId:day.id,taskId:task.id}));
-    node.innerHTML=`<div class='task-grid'><input type='time' value='${attr(task.time||'')}'/><input type='text' placeholder='Задача' value='${attr(task.title||'')}'/><input type='text' placeholder='Google Maps URL' value='${attr(task.mapUrl||'')}'/><div><input type='text' placeholder='Тег' value='${attr(task.tag||'')}'/><button class='btn'>Удалить</button></div></div>${state.showNotes?`<textarea placeholder='Заметки'>${esc(task.notes||'')}</textarea>`:''}<div class='muted'>${task.mapUrl?`<a href='${attr(task.mapUrl)}' target='_blank' rel='noreferrer'>📍 Карта</a>`:''}</div>`;
-    const [timeInput,titleInput,mapInput,tagInput,delBtn]=node.querySelectorAll('input, button'); const noteInput=node.querySelector('textarea');
-    timeInput.oninput=()=>updateTask(day.id,task.id,{time:timeInput.value});
-    titleInput.oninput=()=>updateTask(day.id,task.id,{title:titleInput.value});
-    mapInput.oninput=()=>updateTask(day.id,task.id,{mapUrl:mapInput.value});
-    tagInput.oninput=()=>updateTask(day.id,task.id,{tag:tagInput.value});
-    if(noteInput) noteInput.oninput=()=>updateTask(day.id,task.id,{notes:noteInput.value});
-    delBtn.onclick=()=>applyChange('Удалена задача',()=>{const d=getDay(day.id); d.tasks=d.tasks.filter((t)=>t.id!==task.id);});
+  arr.forEach(t=>{const node=document.createElement('div'); node.className='task'; node.draggable=true; node.ondragstart=(e)=>e.dataTransfer.setData('text/plain',JSON.stringify({fromDayId:d.id,taskId:t.id}));
+    node.innerHTML=`<div class='task-grid'><input type='time' value='${attr(t.time||'')}'/><input type='text' placeholder='Задача' value='${attr(t.title||'')}'/><input type='text' placeholder='Google Maps URL' value='${attr(t.mapUrl||'')}'/><div><input type='text' placeholder='Тег' value='${attr(t.tag||'')}'/><button class='btn'>Удалить</button></div></div><textarea placeholder='Заметки'>${esc(t.notes||'')}</textarea><div class='muted'>${t.mapUrl?`<a href='${attr(t.mapUrl)}' target='_blank'>📍 Карта</a>`:''}</div>`;
+    const [time,title,map,tag,del]=node.querySelectorAll('input, button'); const note=node.querySelector('textarea');
+    time.oninput=()=>upd(t.id,{time:time.value}); title.oninput=()=>upd(t.id,{title:title.value}); map.oninput=()=>upd(t.id,{mapUrl:map.value}); tag.oninput=()=>upd(t.id,{tag:tag.value}); note.oninput=()=>upd(t.id,{notes:note.value});
+    del.onclick=()=>change('Удалена задача',()=>{d.tasks=d.tasks.filter(x=>x.id!==t.id)});
     el.tasks.appendChild(node);
   });
 }
+function renderHour(d){const slots=[];for(let h=6;h<=23;h++)slots.push(String(h).padStart(2,'0')+':00'); el.tasks.innerHTML=`<div class='hour-grid'>${slots.map(s=>{const h=+s.slice(0,2);const b=d.tasks.filter(t=>t.time&&+t.time.slice(0,2)===h);return`<div class='hour-row'><div class='hour-l'>${s}</div><div class='hour-c'>${b.map(t=>`<div>• ${esc(t.title||'')} ${t.mapUrl?`<a href='${attr(t.mapUrl)}' target='_blank'>Карта</a>`:''}</div>`).join('')}</div></div>`}).join('')}</div>`;}
+function upd(taskId,patch){const d=day(); d.tasks=d.tasks.map(t=>t.id===taskId?{...t,...patch}:t); save(); renderTimeline();}
+function moveTask(from,to,taskId){if(from===to)return;change('Перенос задачи',()=>{const f=state.days.find(x=>x.id===from), t=state.days.find(x=>x.id===to); if(!f||!t)return; const i=f.tasks.findIndex(x=>x.id===taskId); if(i<0)return; const [task]=f.tasks.splice(i,1); t.tasks.push(task);});}
 
-function renderHourTimeline(day){
-  const slots=[]; for(let h=6;h<=23;h++) slots.push(`${String(h).padStart(2,'0')}:00`);
-  el.tasks.innerHTML=`<div class='hour-timeline'>${slots.map((slot)=>{ const h=Number(slot.slice(0,2)); const bucket=day.tasks.filter((t)=>t.time && Number(t.time.slice(0,2))===h);
-    return `<div class='hour-row'><div class='hour-label'>${slot}</div><div class='hour-content'>${bucket.map((t)=>`<div class='hour-task'><b>${esc(t.title||'(без названия)')}</b> ${t.time?`· ${t.time}`:''} ${t.mapUrl?`· <a href='${attr(t.mapUrl)}' target='_blank' rel='noreferrer'>Карта</a>`:''}</div>`).join('')}</div></div>`;
-  }).join('')}</div>`;
+function addComment(){const name=(el.commentName.value||'Гость').trim(); const rating=+el.commentRating.value; const text=(el.commentText.value||'').trim(); if(!text)return; change('Новый отзыв',()=>state.comments.push({id:uid(),name,rating,text,time:new Date().toLocaleString('ru-RU')})); el.commentText.value=''; if(rating===5){zombieSafe();}}
+function renderComments(){el.commentList.innerHTML=state.comments.length?state.comments.slice().reverse().map(c=>`<div class='comment-item'><b>${esc(c.name)}</b> · ${'⭐'.repeat(c.rating)}<div>${esc(c.text)}</div><div class='muted'>${c.time}</div></div>`).join(''):`<div class='muted'>Пока отзывов нет</div>`;}
+function renderRating(){if(!state.comments.length){el.overallRating.textContent='0.0';return;} const avg=state.comments.reduce((s,c)=>s+c.rating,0)/state.comments.length; el.overallRating.textContent=avg.toFixed(1);} 
+
+function renderActivity(){el.activityLog.innerHTML=state.activity.length?state.activity.slice().reverse().map(a=>`<div class='activity-item'><span class='activity-time'>${a.t}</span>${esc(a.x)}</div>`).join(''):`<div class='activity-item muted'>Нет действий</div>`;}
+function log(x){state.activity.push({t:new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}),x}); if(state.activity.length>120)state.activity.shift();}
+function change(label,fn){undoStack.push(JSON.stringify(state)); if(undoStack.length>120)undoStack.shift(); redoStack.length=0; fn(); log(label); save(); render();}
+
+id('undoBtn').onclick=()=>{if(!undoStack.length)return; redoStack.push(JSON.stringify(state)); Object.assign(state,JSON.parse(undoStack.pop())); applyTheme(); applyWall(); save(); render();};
+id('redoBtn').onclick=()=>{if(!redoStack.length)return; undoStack.push(JSON.stringify(state)); Object.assign(state,JSON.parse(redoStack.pop())); applyTheme(); applyWall(); save(); render();};
+
+function initRadio(){
+  el.radioSelect.innerHTML=STATIONS.map((s,i)=>`<option value='${i}'>${s.name}</option>`).join('');
+  el.radioSelect.value=String(state.stationIndex||0);
+  setStation(state.stationIndex||0);
+  el.playPause.onclick=()=>{if(el.radioPlayer.paused){el.radioPlayer.play().then(()=>el.playPause.textContent='⏸').catch(()=>{});}else{el.radioPlayer.pause();el.playPause.textContent='▶';}};
+  el.prevStation.onclick=()=>setStation((state.stationIndex-1+STATIONS.length)%STATIONS.length,true);
+  el.nextStation.onclick=()=>setStation((state.stationIndex+1)%STATIONS.length,true);
+  el.radioSelect.onchange=()=>setStation(+el.radioSelect.value,true);
+  el.volumeRange.oninput=()=>el.radioPlayer.volume=+el.volumeRange.value;
+  el.radioPlayer.volume=+el.volumeRange.value;
+}
+function setStation(i,autoplay=false){state.stationIndex=i; const s=STATIONS[i]; el.radioPlayer.src=s.url; el.stationName.textContent=s.name; el.stationArt.textContent=s.emoji; el.radioSelect.value=String(i); save(); if(autoplay){el.radioPlayer.play().then(()=>el.playPause.textContent='⏸').catch(()=>{});}}
+function startEq(){const c=el.eqCanvas,ctx=c.getContext('2d'); function tick(){ctx.clearRect(0,0,c.width,c.height); for(let i=0;i<42;i++){const h=18+Math.random()*78; ctx.fillStyle=`hsl(${130+i*2},85%,${45+Math.random()*20}%)`; ctx.fillRect(8+i*13,c.height-h,9,h);} requestAnimationFrame(tick);} tick();}
+
+function initWalls(){const walls=[['original','Оригинальный'],['retro','Ретро стиль'],['aero','Aero стиль'],['anime','Аниме'],['techno','Крутой стиль техно пова']]; el.wallpaperBtns.innerHTML=''; walls.forEach(([k,t])=>{const b=document.createElement('button'); b.className='btn'; b.textContent=t; b.onclick=()=>change('Смена обоев',()=>{state.wall=k; applyWall();}); el.wallpaperBtns.appendChild(b);}); el.wallpaperUpload.onchange=(e)=>{const f=e.target.files?.[0]; if(!f)return; const r=new FileReader(); r.onload=()=>change('Загружены свои обои',()=>{state.customWall=String(r.result); state.wall='custom'; applyWall();}); r.readAsDataURL(f); e.target.value='';};}
+function applyWall(){const b=document.body; b.setAttribute('data-wall',state.wall||'original'); if(state.wall==='custom'&&state.customWall){b.style.backgroundImage=`url(${state.customWall})`; b.style.backgroundSize='cover';} else {b.style.backgroundImage=''; b.style.backgroundSize='';}}
+
+function drawClocks(){const n=new Date(); const m=new Date(n.toLocaleString('en-US',{timeZone:'Europe/Moscow'})); const j=new Date(n.toLocaleString('en-US',{timeZone:'Asia/Tokyo'})); drawClock(el.clockMsk,m); drawClock(el.clockJst,j); el.timeMsk.textContent=m.toLocaleTimeString('ru-RU'); el.timeJst.textContent=j.toLocaleTimeString('ru-RU');}
+function drawClock(c,d){const x=c.getContext('2d'),w=c.width,p=w/2; x.clearRect(0,0,w,w); x.beginPath(); x.arc(p,p,p-6,0,Math.PI*2); x.fillStyle='rgba(255,255,255,.25)'; x.fill(); x.strokeStyle='rgba(120,140,180,.6)'; x.stroke(); for(let i=0;i<12;i++){const a=i*Math.PI/6; x.beginPath(); x.moveTo(p+Math.cos(a)*(p-18),p+Math.sin(a)*(p-18)); x.lineTo(p+Math.cos(a)*(p-10),p+Math.sin(a)*(p-10)); x.stroke();} hand(x,p,(d.getHours()%12+d.getMinutes()/60)*Math.PI/6-Math.PI/2,p-34,4); hand(x,p,(d.getMinutes()+d.getSeconds()/60)*Math.PI/30-Math.PI/2,p-24,3); hand(x,p,d.getSeconds()*Math.PI/30-Math.PI/2,p-18,2,'#ef4444');}
+function hand(ctx,p,a,l,w,col){ctx.beginPath();ctx.moveTo(p,p);ctx.lineTo(p+Math.cos(a)*l,p+Math.sin(a)*l);ctx.lineWidth=w;ctx.strokeStyle=col||'#111';ctx.stroke();}
+
+function initCompass(){
+  let heading=0;
+  if(window.DeviceOrientationEvent){ window.addEventListener('deviceorientation',(e)=>{ if(typeof e.alpha==='number'){heading=e.alpha; updateCompass(heading);} }); }
+  if(navigator.geolocation){ navigator.geolocation.getCurrentPosition((pos)=>{el.geoText.textContent=`lat ${pos.coords.latitude.toFixed(2)}, lon ${pos.coords.longitude.toFixed(2)}`;},()=>{el.geoText.textContent='геолокация недоступна';}); }
+  setInterval(()=>{heading=(heading+8)%360; updateCompass(heading);},1200);
+}
+function updateCompass(deg){el.compass.style.transform=`rotate(${deg}deg)`;}
+
+let geiger=0.22, spikeUntil=0;
+function geigerSpike(){spikeUntil=Date.now()+5000;}
+function updateGeiger(){const high=Date.now()<spikeUntil; geiger=high?(1.2+Math.random()*3.2):(0.12+Math.random()*0.35); el.geigerValue.textContent=`${geiger.toFixed(2)} μSv/h`; el.geigerBar.style.width=`${Math.min(100,geiger*25)}%`; beep(high?1500:420,high?.09:.02);} 
+function beep(freq,vol){if(!state.notifSound)return; const a=beep.ctx||(beep.ctx=new (window.AudioContext||window.webkitAudioContext)()); const o=a.createOscillator(),g=a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value=freq; g.gain.value=vol; o.start(); o.stop(a.currentTime+0.03);} 
+
+function updateOnline(){el.onlineCount.textContent=String(400+Math.floor(Math.random()*201));}
+function pushNotification(){const n=document.createElement('div'); n.className='notif'; n.innerHTML=`<b>Новое сообщение</b><br><small>Пользователь обновил план поездки</small>`; el.notifStack.prepend(n); while(el.notifStack.children.length>4) el.notifStack.lastChild.remove(); if(state.notifSound) beep(740,.03); setTimeout(()=>n.remove(),4200);} 
+
+function closeAdWithMath(which){
+  let allow=true;
+  if(Math.random()<0.3){
+    const a=Math.floor(Math.random()*9)+1,b=Math.floor(Math.random()*9)+1;
+    const ans=prompt(`Решите пример для закрытия рекламы: ${a} + ${b} = ?`);
+    allow=Number(ans)===(a+b);
+  }
+  if(!allow) return;
+  const target=which==='side'?el.sideAd:el.bottomAd;
+  target.classList.add('hidden');
+  setTimeout(()=>target.classList.remove('hidden'),60000);
 }
 
-function renderTabs(){
-  document.querySelectorAll('.tab').forEach((t)=>t.classList.toggle('active',t.dataset.tab===state.activeTab));
-  if(state.activeTab==='moves') el.tabContent.innerHTML=`<div class='note'><b>Осака → Токио</b><br>Ночной автобус 09.09 21:00 → 10.09 07:00.</div>`;
-  else if(state.activeTab==='tickets') el.tabContent.innerHTML=`<div class='note'><b>Билеты</b><br>31.08 21:05 LED → 01.09 18:00 KIX, обратно 16.09.</div>`;
-  else el.tabContent.innerHTML=`<div class='note'><b>Советы</b><br>Бронировать TeamLab заранее, проверить багаж ночного автобуса.</div>`;
+function updateZombie(){
+  const total=5*60*1000; const passed=Math.min(total,Date.now()-state.zombieStart); const p=(passed/total)*100;
+  el.zombieProgress.style.width=`${p}%`;
+  if(p>=100) el.zombieText.textContent='☣ КРИТИЧЕСКАЯ СТАДИЯ: ПК под атакой зомби! Оставьте 5⭐ отзыв!';
 }
+function zombieSafe(){ el.zombieText.textContent='✅ Спасибо! зомби отступили'; state.zombieStart=Date.now()+5*60*1000; setTimeout(()=>{state.zombieStart=Date.now(); el.zombieText.textContent='⚠ Ваш ПК находится под атакой зомби!'; save();},5000); save(); }
 
-function renderSettingsDays(){
-  el.settingsDays.innerHTML='';
-  state.days.forEach((d,i)=>{
-    const item=document.createElement('div'); item.className='settings-item';
-    item.innerHTML=`<div class='muted'>День ${i+1} · ${d.dateLabel}</div><div class='settings-row'><input type='text' value='${attr(d.dateLabel)}'/><select>${Object.values(CITY).map((c)=>`<option value='${attr(c)}' ${c===d.city?'selected':''}>${c}</option>`).join('')}</select></div><input type='text' value='${attr(d.title)}'/><div class='settings-actions'><button class='btn'>⬆️</button><button class='btn'>⬇️</button><button class='btn'>🗑</button></div>`;
-    const [dateInput,citySelect,titleInput,upBtn,downBtn,delBtn]=item.querySelectorAll('input, select, button');
-    dateInput.onchange=()=>applyChange('Изменена дата дня',()=>getDay(d.id).dateLabel=dateInput.value||d.dateLabel);
-    citySelect.onchange=()=>applyChange('Изменен город дня',()=>getDay(d.id).city=citySelect.value);
-    titleInput.onchange=()=>applyChange('Изменен заголовок дня',()=>getDay(d.id).title=titleInput.value);
-    upBtn.onclick=()=>moveDay(i,i-1); downBtn.onclick=()=>moveDay(i,i+1); delBtn.onclick=()=>removeDay(d.id);
-    el.settingsDays.appendChild(item);
-  });
-}
+function startSnow(){setInterval(()=>{const s=document.createElement('div');s.className='snow';s.textContent='❄';s.style.left=Math.random()*100+'vw';s.style.fontSize=(10+Math.random()*18)+'px';s.style.animationDuration=(6+Math.random()*8)+'s';el.snowLayer.appendChild(s);setTimeout(()=>s.remove(),16000);},160);} 
+function startEmojiReactions(){const em=['🔥','😍','👍','😂','✨','🎉','⚡'];setInterval(()=>{const e=document.createElement('div');e.className='emoji-float';e.textContent=em[Math.floor(Math.random()*em.length)];e.style.right=(8+Math.random()*120)+'px';e.style.animationDuration=(4+Math.random()*4)+'s';el.emojiLayer.appendChild(e);setTimeout(()=>e.remove(),9000);},900);} 
 
-function addComment(){
-  const name=(el.commentName.value||'Гость').trim();
-  const rating=Number(el.commentRating.value||5);
-  const text=(el.commentText.value||'').trim();
-  if(!text) return;
-  applyChange('Добавлен комментарий',()=>{ state.comments.push({id:uid(),name,rating,text,time:new Date().toLocaleString('ru-RU')}); });
-  el.commentText.value='';
-}
-function renderComments(){
-  el.commentList.innerHTML = state.comments.length ? state.comments.slice().reverse().map((c)=>`<div class='comment-item'><b>${esc(c.name)}</b> · ${'⭐'.repeat(c.rating)}<div>${esc(c.text)}</div><div class='muted'>${c.time}</div></div>`).join('') : `<div class='muted'>Пока отзывов нет.</div>`;
-}
-function renderOverallRating(){
-  if(!state.comments.length){ el.overallRating.textContent='0.0'; return; }
-  const avg = state.comments.reduce((s,c)=>s+Number(c.rating||0),0)/state.comments.length;
-  el.overallRating.textContent = avg.toFixed(1);
-}
+function exp(){const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download='planner.json';a.click();URL.revokeObjectURL(u);} 
+function imp(e){const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const p=JSON.parse(String(r.result));if(!p.days?.length)return;Object.assign(state,p);applyTheme();applyWall();save();render();}catch{}};r.readAsText(f);e.target.value='';}
 
-function renderActivityLog(){
-  el.activityLog.innerHTML = state.activityLog.length ? state.activityLog.slice().reverse().map((a)=>`<div class='activity-item'><span class='activity-time'>${a.time}</span>${esc(a.text)}</div>`).join('') : `<div class='activity-item muted'>Пока действий нет.</div>`;
-}
-function addActivity(text){ state.activityLog.push({time:new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}), text}); if(state.activityLog.length>120) state.activityLog.shift(); }
+function seedDays(){const data=[['31.08','Вылет',CITY.FLIGHT],['01.09','Прилёт KIX + Дотонбори',CITY.OSAKA],['02.09','Осака центр',CITY.OSAKA],['03.09','Осака юг',CITY.OSAKA],['04.09','Нара (day trip)',CITY.NARA],['05.09','Киото восток',CITY.KYOTO],['06.09','Киото Арасияма',CITY.KYOTO],['07.09','Киото север',CITY.KYOTO],['08.09','Осака свободно',CITY.OSAKA],['09.09','Осака → Токио (автобус)',CITY.BUS],['10.09','Токио прибытие',CITY.TOKYO],['11.09','Shibuya / Shinjuku',CITY.TOKYO],['12.09','Odaiba / TeamLab',CITY.TOKYO],['13.09','Hakone / Fuji',CITY.TOKYO],['14.09','Kamakura / Nikko',CITY.TOKYO],['15.09','Токио свободно',CITY.TOKYO],['16.09','Вылет HND',CITY.FLIGHT]];
+return data.map(([dateLabel,title,city],idx)=>({id:uid(),dateLabel,title,city,tasks:idx===1?[{id:uid(),time:'21:00',title:'Дотонбори',notes:'',tag:'вечер',mapUrl:'https://maps.google.com/?q=Dotonbori'}]:[]}));}
 
-function applyChange(label, mutator){ undoStack.push(snapshotState()); if(undoStack.length>120) undoStack.shift(); redoStack.length=0; mutator(); addActivity(label); save(); render(); pushSync(); }
-function undo(){ if(!undoStack.length) return; redoStack.push(snapshotState()); restoreSnapshot(undoStack.pop()); addActivity('Undo'); save(); render(); pushSync(); }
-function redo(){ if(!redoStack.length) return; undoStack.push(snapshotState()); restoreSnapshot(redoStack.pop()); addActivity('Redo'); save(); render(); pushSync(); }
-function snapshotState(){ return JSON.stringify(state); }
-function restoreSnapshot(s){ Object.assign(state, JSON.parse(s)); applyTheme(); applyWallpaper(); }
-
-function moveDay(fromIdx,toIdx){ if(toIdx<0||toIdx>=state.days.length) return; applyChange('Перемещен день',()=>{ const [d]=state.days.splice(fromIdx,1); state.days.splice(toIdx,0,d); }); }
-function removeDay(dayId){ if(state.days.length<=1) return; applyChange('Удален день',()=>{ const idx=state.days.findIndex((d)=>d.id===dayId); if(idx<0)return; state.days.splice(idx,1); if(state.selectedDayId===dayId) state.selectedDayId=state.days[Math.max(0,idx-1)]?.id||state.days[0]?.id; }); }
-function moveTask(fromDayId,toDayId,taskId){ if(fromDayId===toDayId) return; applyChange('Перенос задачи между днями',()=>{ const f=getDay(fromDayId), t=getDay(toDayId); if(!f||!t) return; const idx=f.tasks.findIndex((x)=>x.id===taskId); if(idx<0)return; const [task]=f.tasks.splice(idx,1); t.tasks.push(task);}); }
-function updateTask(dayId,taskId,patch){ const day=getDay(dayId); if(!day) return; day.tasks=day.tasks.map((t)=>t.id===taskId?{...t,...patch}:t); save(); renderSelectedDay(); renderTimeline(); pushSync(); }
-
-function patchState(patch){ Object.assign(state,patch); save(); render(); }
-function openModal(modal,show){ modal.classList.toggle('hidden',!show); }
-function getDay(id){ return state.days.find((d)=>d.id===id); }
-
-async function connectSync(silent=false){
-  try{
-    const cfg={ apiKey:(el.fbApiKey.value||syncState.config.apiKey||'').trim(), authDomain:(el.fbAuthDomain.value||syncState.config.authDomain||'').trim(), databaseURL:(el.fbDbUrl.value||syncState.config.databaseURL||'').trim(), projectId:(el.fbProjectId.value||syncState.config.projectId||'').trim(), appId:(el.fbAppId.value||syncState.config.appId||'').trim(), path:(el.fbPath.value||syncState.config.path||'sharedPlanner').trim() };
-    if(!cfg.apiKey||!cfg.databaseURL||!cfg.projectId||!cfg.appId){ renderSyncStatus('Заполните Firebase config поля'); return; }
-    saveSyncConfig(cfg); syncState.config=cfg;
-    const appMod=await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js');
-    const dbMod=await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js');
-    disconnectSync(true);
-    syncState.app=appMod.initializeApp(cfg,'trip-planner-'+Math.random().toString(16).slice(2,8));
-    syncState.db=dbMod.getDatabase(syncState.app); syncState.ref=dbMod.ref(syncState.db,`${cfg.path}/state`);
-    syncState.unsub=dbMod.onValue(syncState.ref,(snap)=>{ const r=snap.val(); if(!r?.state||!r?.updatedAt) return; if(r.clientId===clientId||r.updatedAt<=syncState.lastRemoteTs) return; syncState.lastRemoteTs=r.updatedAt; syncState.mutePush=true; Object.assign(state,r.state); if(!state.selectedDayId) state.selectedDayId=state.days[0]?.id||null; applyTheme(); applyWallpaper(); save(); render(); syncState.mutePush=false; renderSyncStatus('Sync подключен: получены изменения'); });
-    syncState.connected=true; renderSyncStatus('Sync подключен'); if(!silent) openModal(el.syncModal,false); pushSync();
-  }catch{ renderSyncStatus('Ошибка подключения Sync'); }
-}
-function disconnectSync(silent=false){ try{ if(syncState.unsub) syncState.unsub(); }catch{} syncState.connected=false; syncState.unsub=null; if(!silent) renderSyncStatus('Sync отключен'); }
-async function pushSync(){ if(!syncState.connected||syncState.mutePush||!syncState.ref||!syncState.db) return; try{ const dbMod=await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js'); await dbMod.set(syncState.ref,{updatedAt:Date.now(),clientId,state}); }catch{ renderSyncStatus('Не удалось отправить изменения в cloud'); }}
-
-function fillSyncForm(){ const c=syncState.config||{}; el.fbApiKey.value=c.apiKey||''; el.fbAuthDomain.value=c.authDomain||''; el.fbDbUrl.value=c.databaseURL||''; el.fbProjectId.value=c.projectId||''; el.fbAppId.value=c.appId||''; el.fbPath.value=c.path||'sharedPlanner'; }
-function renderSyncStatus(text){ el.syncStatus.textContent=text; }
-
-function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='japan-trip-planner.json'; a.click(); URL.revokeObjectURL(url); }
-function importJSON(e){ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ const parsed=parseJSON(String(r.result)); if(!parsed?.days?.length) return; undoStack.push(snapshotState()); Object.assign(state,parsed); if(!state.selectedDayId) state.selectedDayId=state.days[0]?.id; if(!state.theme) state.theme='light'; if(!state.dayView) state.dayView='list'; if(!Array.isArray(state.activityLog)) state.activityLog=[]; if(!Array.isArray(state.comments)) state.comments=[]; addActivity('Импортирован JSON'); applyTheme(); applyWallpaper(); save(); render(); pushSync(); }; r.readAsText(f); e.target.value=''; }
-
-function nextDateLabel(){ const last=state.days[state.days.length-1]?.dateLabel||'01.01'; const m=last.match(/^(\d{1,2})\.(\d{1,2})$/); if(!m) return last; let d=Number(m[1])+1, mo=Number(m[2]); if(d>31){d=1;mo+=1;} if(mo>12) mo=1; return `${String(d).padStart(2,'0')}.${String(mo).padStart(2,'0')}`; }
-
-function makeDefaultDays(){ const data=[['31.08','Вылет',CITY.FLIGHT],['01.09','Прилёт KIX + Дотонбори',CITY.OSAKA],['02.09','Осака центр',CITY.OSAKA],['03.09','Осака юг',CITY.OSAKA],['04.09','Нара (day trip)',CITY.NARA],['05.09','Киото восток',CITY.KYOTO],['06.09','Киото Арасияма',CITY.KYOTO],['07.09','Киото север / спокойный день',CITY.KYOTO],['08.09','Осака (свободный день)',CITY.OSAKA],['09.09','Осака → Токио (автобус 21:00)',CITY.BUS],['10.09','Токио (07:00 прибытие)',CITY.TOKYO],['11.09','Shibuya + Harajuku + Shinjuku',CITY.TOKYO],['12.09','Odaiba / TeamLab',CITY.TOKYO],['13.09','Выезд: Hakone / Fuji',CITY.TOKYO],['14.09','Выезд: Kamakura / Nikko',CITY.TOKYO],['15.09','Токио (финальный свободный)',CITY.TOKYO],['16.09','Вылет HND 08:40',CITY.FLIGHT]];
-  return data.map(([dateLabel,title,city],idx)=>({id:uid(),dateLabel,title,city,tasks:seedTasks(idx)})); }
-function seedTasks(i){ if(i===1) return [makeTask('19:30','Дорога KIX → Нанба','Nankai / Limousine Bus','логистика','https://maps.google.com/?q=Namba+Station'),makeTask('21:00','Дотонбори — лёгкая прогулка','без плотного плана','вечер','https://maps.google.com/?q=Dotonbori')]; if(i===2) return [makeTask('09:00','Osaka Castle','музей внутри','must','https://maps.google.com/?q=Osaka+Castle'),makeTask('18:00','Umeda Sky Building','закат/ночной вид','view','https://maps.google.com/?q=Umeda+Sky+Building')]; if(i===9) return [makeTask('21:00','Ночной автобус Осака → Токио','прибытие ~07:00','логистика')]; if(i===16) return [makeTask('05:45','Выезд в HND','запас времени','логистика','https://maps.google.com/?q=Haneda+Airport')]; return []; }
-function makeTask(time='',title='',notes='',tag='',mapUrl=''){ return {id:uid(),time,title,notes,tag,mapUrl}; }
-
-function byId(id){ return document.getElementById(id); }
-function uid(){ return Math.random().toString(16).slice(2)+Date.now().toString(16); }
-function parseJSON(s){ try{return JSON.parse(s);}catch{return null;} }
-function load(){ return parseJSON(localStorage.getItem(STORE_KEY)); }
-function save(){ localStorage.setItem(STORE_KEY,JSON.stringify(state)); }
-function loadSyncConfig(){ return parseJSON(localStorage.getItem(SYNC_KEY))||{}; }
-function saveSyncConfig(cfg){ localStorage.setItem(SYNC_KEY,JSON.stringify(cfg)); }
-function esc(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
-function attr(s){ return esc(s).replaceAll('"','&quot;'); }
+function day(){return state.days.find(d=>d.id===state.selectedDayId)}
+function applyTheme(){document.body.setAttribute('data-theme',state.theme==='dark'?'dark':'light')}
+function save(){localStorage.setItem(STORE_KEY,JSON.stringify(state))}
+function id(x){return document.getElementById(x)}
+function uid(){return Math.random().toString(16).slice(2)+Date.now().toString(16)}
+function esc(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
+function attr(s){return esc(s).replaceAll('"','&quot;')}
