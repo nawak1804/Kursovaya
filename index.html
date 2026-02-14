@@ -30,6 +30,12 @@
         </div>
       </header>
 
+      <section class="card glass">
+        <h2>Стили сайта и фон</h2>
+        <div id="wallpaperButtons" class="wallpaper-row"></div>
+        <label class="btn file-label">Загрузить свой фон<input id="wallpaperUpload" type="file" accept="image/*" /></label>
+      </section>
+
       <section class="card glass widgets-grid">
         <div>
           <h2>Часы и компас</h2>
@@ -81,6 +87,17 @@
           <p class="muted">Наведите курсор на крестик рекламы — будет всплеск.</p>
         </aside>
       </main>
+
+      <section class="card glass">
+        <div class="panel-top">
+          <h2>История действий</h2>
+          <div class="panel-top-right">
+            <button id="undoBtn" class="btn">↶ Undo</button>
+            <button id="redoBtn" class="btn">↷ Redo</button>
+          </div>
+        </div>
+        <div id="activityLog" class="activity-log"></div>
+      </section>
 
       <section class="card glass">
         <h2>Отзывы</h2>

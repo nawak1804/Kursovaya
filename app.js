@@ -1,4 +1,4 @@
-const STORE_KEY = 'jp_planner_v8';
+const STORE_KEY = 'jp_planner_v9';
 const STATIONS = [
   { name: 'Наше Радио', url: 'https://nashe1.hostingradio.ru/nashe-256', emoji: '🎸' },
   { name: 'Радио Шансон', url: 'https://chanson.hostingradio.ru:8041/chanson256.mp3', emoji: '🎤' },
@@ -9,32 +9,37 @@ const STATIONS = [
   { name: 'Радио Рекорд', url: 'https://pub0302.101.ru:8443/stream/trust_128', emoji: '🔥' },
   { name: 'Europa Plus', url: 'https://emgregion.hostingradio.ru:8064/moscow.europaplus.mp3', emoji: '✨' },
 ];
-const CITIES = ['Осака', 'Киото', 'Нара', 'Токио', 'Ночной автобус', 'Перелёт'];
 const ICON = { 'Осака':'🏮','Киото':'⛩️','Нара':'🦌','Токио':'🗼','Ночной автобус':'🚌','Перелёт':'✈️' };
 
 const state = load() || {
   theme: 'light', compact: false, search: '', dayView: 'list', selectedDayId: null,
   stationIndex: 0, notifSound: true, zombieStart: Date.now(),
-  days: seedDays(), comments: []
+  wallpaper: 'original', customWallpaper: '',
+  days: seedDays(), comments: [], activity: []
 };
 if (!state.selectedDayId && state.days.length) state.selectedDayId = state.days[0].id;
+if (!Array.isArray(state.activity)) state.activity = [];
 
-const undo = [], redo = [];
+const undoStack = [], redoStack = [];
 const el = mapEls([
   'themeToggle','compactToggle','searchInput','exportBtn','importInput','timeline','tasksList','dayHeader','addTaskBtn','viewModeBtn',
   'overallRating','commentName','commentRating','commentText','addCommentBtn','commentList','backToTop','onlineCount','notifStack','notifSoundBtn',
   'zombieProgress','zombieText','stationName','stationArt','radioSelect','radioPlayer','playPause','prevStation','nextStation','volumeRange','eqCanvas',
   'clockMsk','clockJst','timeMsk','timeJst','compass','geoText','sideAd','bottomAd','fullscreenNudge','closeNudge',
-  'geigerValue','geigerBarFill','snowLayer','emojiLayer'
+  'geigerValue','geigerBarFill','snowLayer','emojiLayer','undoBtn','redoBtn','activityLog','wallpaperButtons','wallpaperUpload'
 ]);
 
 let geigerSpikeUntil = 0;
 let beepCtx = null;
+let compassDeg = 0;
 
 init();
 
 function init() {
   applyTheme();
+  applyWallpaper();
+  renderWallpaperButtons();
+
   if (el.themeToggle) el.themeToggle.checked = state.theme === 'dark';
   if (el.compactToggle) el.compactToggle.checked = state.compact;
   if (el.searchInput) el.searchInput.value = state.search;
@@ -60,7 +65,7 @@ function init() {
 
 function bindUI() {
   el.themeToggle?.addEventListener('change', () => {
-    applyChange(() => { state.theme = el.themeToggle.checked ? 'dark' : 'light'; applyTheme(); });
+    applyChange('Смена темы', () => { state.theme = el.themeToggle.checked ? 'dark' : 'light'; applyTheme(); });
   });
   el.compactToggle?.addEventListener('change', () => {
     state.compact = el.compactToggle.checked; save(); renderTimeline();
@@ -69,7 +74,7 @@ function bindUI() {
     state.search = el.searchInput.value; save(); renderTimeline();
   });
 
-  el.addTaskBtn?.addEventListener('click', () => applyChange(() => {
+  el.addTaskBtn?.addEventListener('click', () => applyChange('Добавлена задача', () => {
     const d = getDay(); if (!d) return;
     d.tasks.push({ id: uid(), time: '', title: '', tag: '', notes: '', mapUrl: '' });
   }));
@@ -81,7 +86,7 @@ function bindUI() {
     const text = (el.commentText?.value || '').trim();
     if (!text) return;
     const rating = Number(el.commentRating?.value || 5);
-    applyChange(() => {
+    applyChange('Добавлен отзыв', () => {
       state.comments.push({ id: uid(), name: (el.commentName?.value || 'Гость').trim() || 'Гость', rating, text, time: new Date().toLocaleString('ru-RU') });
       if (rating === 5) zombieSafe();
     });
@@ -92,6 +97,9 @@ function bindUI() {
     state.notifSound = !state.notifSound; save();
     el.notifSoundBtn.textContent = state.notifSound ? '🔊 Звук уведомлений' : '🔇 Звук уведомлений';
   });
+
+  el.undoBtn?.addEventListener('click', doUndo);
+  el.redoBtn?.addEventListener('click', doRedo);
 
   el.backToTop?.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
   window.addEventListener('scroll', () => el.backToTop?.classList.toggle('show', window.scrollY > 380));
@@ -105,9 +113,19 @@ function bindUI() {
 
   el.exportBtn?.addEventListener('click', exportJSON);
   el.importInput?.addEventListener('change', importJSON);
+
+  el.wallpaperUpload?.addEventListener('change', uploadWallpaper);
 }
 
-function renderAll() { renderTimeline(); renderSelectedDay(); renderComments(); renderRating(); updateViewModeText(); }
+function renderAll() {
+  renderTimeline();
+  renderSelectedDay();
+  renderComments();
+  renderRating();
+  renderActivity();
+  updateViewModeText();
+  if (el.notifSoundBtn) el.notifSoundBtn.textContent = state.notifSound ? '🔊 Звук уведомлений' : '🔇 Звук уведомлений';
+}
 function updateViewModeText() { if (el.viewModeBtn) el.viewModeBtn.textContent = state.dayView === 'list' ? 'Таймлайн по часам' : 'Режим карточек'; }
 
 function renderTimeline() {
@@ -152,12 +170,12 @@ function renderSelectedDay() {
 
     const [timeEl, titleEl, mapEl, tagEl, delBtn] = node.querySelectorAll('input, button');
     const noteEl = node.querySelector('textarea');
-    timeEl.oninput = () => patchTask(t.id, { time: timeEl.value });
-    titleEl.oninput = () => patchTask(t.id, { title: titleEl.value });
-    mapEl.oninput = () => patchTask(t.id, { mapUrl: mapEl.value });
-    tagEl.oninput = () => patchTask(t.id, { tag: tagEl.value });
-    noteEl.oninput = () => patchTask(t.id, { notes: noteEl.value });
-    delBtn.onclick = () => applyChange(() => { d.tasks = d.tasks.filter((x) => x.id !== t.id); });
+    timeEl.onchange = () => patchTask(t.id, { time: timeEl.value }, 'Изменено время задачи');
+    titleEl.onchange = () => patchTask(t.id, { title: titleEl.value }, 'Изменен заголовок задачи');
+    mapEl.onchange = () => patchTask(t.id, { mapUrl: mapEl.value }, 'Изменена ссылка карты');
+    tagEl.onchange = () => patchTask(t.id, { tag: tagEl.value }, 'Изменен тег задачи');
+    noteEl.onchange = () => patchTask(t.id, { notes: noteEl.value }, 'Изменены заметки');
+    delBtn.onclick = () => applyChange('Удалена задача', () => { d.tasks = d.tasks.filter((x) => x.id !== t.id); });
 
     el.tasksList.appendChild(node);
   });
@@ -172,15 +190,16 @@ function renderHourView(d) {
   }).join('')}</div>`;
 }
 
-function patchTask(taskId, patch) {
+function patchTask(taskId, patch, actionText) {
   const d = getDay(); if (!d) return;
-  d.tasks = d.tasks.map((t) => t.id === taskId ? { ...t, ...patch } : t);
-  save(); renderTimeline();
+  applyChange(actionText, () => {
+    d.tasks = d.tasks.map((t) => t.id === taskId ? { ...t, ...patch } : t);
+  });
 }
 
 function moveTask(fromDayId, toDayId, taskId) {
   if (fromDayId === toDayId) return;
-  applyChange(() => {
+  applyChange('Перенос задачи', () => {
     const from = state.days.find((x) => x.id === fromDayId);
     const to = state.days.find((x) => x.id === toDayId);
     if (!from || !to) return;
@@ -204,7 +223,53 @@ function renderRating() {
   el.overallRating.textContent = avg.toFixed(1);
 }
 
+function renderActivity() {
+  if (!el.activityLog) return;
+  if (!state.activity.length) { el.activityLog.innerHTML = `<div class='activity-item muted'>Пока действий нет</div>`; return; }
+  el.activityLog.innerHTML = state.activity.slice().reverse().map((a) => `<div class='activity-item'>${esc(a.time)} · ${esc(a.text)}</div>`).join('');
+}
+
 function applyTheme() { document.body.setAttribute('data-theme', state.theme === 'dark' ? 'dark' : 'light'); }
+
+function renderWallpaperButtons() {
+  if (!el.wallpaperButtons) return;
+  const presets = [
+    ['original','Оригинальный'],['retro','Ретро стиль'],['aero','Aero стиль'],['anime','Аниме'],['techno','Крутой техно']
+  ];
+  el.wallpaperButtons.innerHTML = '';
+  presets.forEach(([key, label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = label;
+    btn.onclick = () => applyChange('Смена фона', () => { state.wallpaper = key; applyWallpaper(); });
+    el.wallpaperButtons.appendChild(btn);
+  });
+}
+
+function uploadWallpaper(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => applyChange('Загружен пользовательский фон', () => {
+    state.customWallpaper = String(reader.result);
+    state.wallpaper = 'custom';
+    applyWallpaper();
+  });
+  reader.readAsDataURL(file);
+  e.target.value = '';
+}
+
+function applyWallpaper() {
+  const wall = state.wallpaper || 'original';
+  document.body.setAttribute('data-wall', wall);
+  if (wall === 'custom' && state.customWallpaper) {
+    document.body.style.backgroundImage = `url(${state.customWallpaper})`;
+    document.body.style.backgroundSize = 'cover';
+  } else {
+    document.body.style.backgroundImage = '';
+    document.body.style.backgroundSize = '';
+  }
+}
 
 function initRadio() {
   if (!el.radioSelect || !el.radioPlayer) return;
@@ -275,7 +340,6 @@ function drawClock(canvas, date) {
 }
 function hand(ctx, p, a, l, w, col) { ctx.beginPath(); ctx.moveTo(p, p); ctx.lineTo(p + Math.cos(a) * l, p + Math.sin(a) * l); ctx.lineWidth = w; ctx.strokeStyle = col || '#111'; ctx.stroke(); }
 
-let compassDeg = 0;
 function initCompassGeo() {
   if (window.DeviceOrientationEvent) {
     window.addEventListener('deviceorientation', (e) => {
@@ -366,15 +430,25 @@ function beep(freq, vol) {
   } catch {}
 }
 
-function applyChange(mutator) {
-  undo.push(JSON.stringify(state)); if (undo.length > 120) undo.shift(); redo.length = 0;
-  mutator(); save(); renderAll();
+function applyChange(text, mutator) {
+  undoStack.push(JSON.stringify(state)); if (undoStack.length > 120) undoStack.shift(); redoStack.length = 0;
+  mutator();
+  state.activity.push({ time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), text });
+  if (state.activity.length > 120) state.activity.shift();
+  save(); renderAll();
 }
-
-const undoBtn = document.getElementById('undoBtn');
-if (undoBtn) undoBtn.onclick = () => { if (!undo.length) return; redo.push(JSON.stringify(state)); Object.assign(state, JSON.parse(undo.pop())); applyTheme(); save(); renderAll(); };
-const redoBtn = document.getElementById('redoBtn');
-if (redoBtn) redoBtn.onclick = () => { if (!redo.length) return; undo.push(JSON.stringify(state)); Object.assign(state, JSON.parse(redo.pop())); applyTheme(); save(); renderAll(); };
+function doUndo() {
+  if (!undoStack.length) return;
+  redoStack.push(JSON.stringify(state));
+  Object.assign(state, JSON.parse(undoStack.pop()));
+  applyTheme(); applyWallpaper(); save(); renderAll();
+}
+function doRedo() {
+  if (!redoStack.length) return;
+  undoStack.push(JSON.stringify(state));
+  Object.assign(state, JSON.parse(redoStack.pop()));
+  applyTheme(); applyWallpaper(); save(); renderAll();
+}
 
 function exportJSON() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -390,7 +464,8 @@ function importJSON(e) {
       if (!parsed?.days?.length) return;
       Object.assign(state, parsed);
       if (!state.selectedDayId && state.days.length) state.selectedDayId = state.days[0].id;
-      applyTheme(); save(); renderAll();
+      if (!Array.isArray(state.activity)) state.activity = [];
+      applyTheme(); applyWallpaper(); save(); renderAll();
     } catch {}
   };
   r.readAsText(f); e.target.value = '';
