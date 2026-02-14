@@ -1,0 +1,492 @@
+const CITY = {
+  OSAKA: 'Осака', KYOTO: 'Киото', NARA: 'Нара', TOKYO: 'Токио', BUS: 'Ночной автобус', FLIGHT: 'Перелёт',
+};
+const CITY_ICON = { [CITY.OSAKA]:'🏮',[CITY.KYOTO]:'⛩️',[CITY.NARA]:'🦌',[CITY.TOKYO]:'🗼',[CITY.BUS]:'🚌',[CITY.FLIGHT]:'✈️' };
+const CITY_CLASS = { [CITY.OSAKA]:'city-osaka',[CITY.KYOTO]:'city-kyoto',[CITY.NARA]:'city-nara',[CITY.TOKYO]:'city-tokyo',[CITY.BUS]:'city-bus',[CITY.FLIGHT]:'city-flight' };
+
+const STORE_KEY = 'jp_planner_v5';
+const SYNC_KEY = 'jp_planner_sync_cfg';
+const clientId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
+const undoStack = [];
+const redoStack = [];
+
+const state = load() || {
+  compact:false,
+  showNotes:true,
+  search:'',
+  activeTab:'moves',
+  theme:'light',
+  dayView:'list',
+  selectedDayId:null,
+  days:makeDefaultDays(),
+  activityLog: [],
+};
+if (!state.selectedDayId) state.selectedDayId = state.days[1]?.id || state.days[0]?.id;
+if (!Array.isArray(state.activityLog)) state.activityLog = [];
+
+const syncState = {
+  config: loadSyncConfig(), connected: false, app: null, db: null, ref: null, unsub: null, mutePush: false, lastRemoteTs: 0,
+};
+
+const el = {
+  themeToggle: byId('themeToggle'), viewModeBtn: byId('viewModeBtn'), undoBtn: byId('undoBtn'), redoBtn: byId('redoBtn'),
+  activityLog: byId('activityLog'), backToTop: byId('backToTop'),
+  compact: byId('compact'), showNotes: byId('showNotes'), search: byId('search'), exportBtn: byId('exportBtn'),
+  importInput: byId('importInput'), settingsBtn: byId('settingsBtn'), summary: byId('summary'), timeline: byId('timeline'),
+  selectedCityBadge: byId('selectedCityBadge'), addTaskBtn: byId('addTaskBtn'), dayHeader: byId('dayHeader'), tasks: byId('tasks'),
+  tabContent: byId('tabContent'), settingsModal: byId('settingsModal'), closeSettings: byId('closeSettings'), settingsDays: byId('settingsDays'),
+  addDayBtn: byId('addDayBtn'), resetBtn: byId('resetBtn'), kyotoNightBtn: byId('kyotoNightBtn'), syncBtn: byId('syncBtn'), syncModal: byId('syncModal'),
+  closeSync: byId('closeSync'), fbApiKey: byId('fbApiKey'), fbAuthDomain: byId('fbAuthDomain'), fbDbUrl: byId('fbDbUrl'),
+  fbProjectId: byId('fbProjectId'), fbAppId: byId('fbAppId'), fbPath: byId('fbPath'), connectSync: byId('connectSync'),
+  disconnectSync: byId('disconnectSync'), syncStatus: byId('syncStatus'),
+};
+
+init();
+
+function init() {
+  applyTheme();
+  el.themeToggle.checked = state.theme === 'dark';
+  el.compact.checked = state.compact;
+  el.showNotes.checked = state.showNotes;
+  el.search.value = state.search;
+
+  el.themeToggle.onchange = () => {
+    applyChange('Переключение темы', () => {
+      state.theme = el.themeToggle.checked ? 'dark' : 'light';
+      applyTheme();
+    });
+  };
+  el.viewModeBtn.onclick = () => {
+    state.dayView = state.dayView === 'list' ? 'timeline' : 'list';
+    save(); renderSelectedDay();
+  };
+  el.compact.onchange = () => patchState({ compact: el.compact.checked });
+  el.showNotes.onchange = () => patchState({ showNotes: el.showNotes.checked });
+  el.search.oninput = () => patchState({ search: el.search.value });
+  el.exportBtn.onclick = exportJSON;
+  el.importInput.onchange = importJSON;
+  el.addTaskBtn.onclick = () => state.selectedDayId && applyChange('Добавлена задача', () => {
+    const day = state.days.find((d) => d.id === state.selectedDayId);
+    if (!day) return;
+    day.tasks.push(makeTask());
+  });
+
+  el.undoBtn.onclick = undo;
+  el.redoBtn.onclick = redo;
+
+  el.settingsBtn.onclick = () => openModal(el.settingsModal, true);
+  el.closeSettings.onclick = () => openModal(el.settingsModal, false);
+  el.settingsModal.querySelector('.modal-backdrop').onclick = () => openModal(el.settingsModal, false);
+
+  el.syncBtn.onclick = () => openModal(el.syncModal, true);
+  el.closeSync.onclick = () => openModal(el.syncModal, false);
+  el.syncModal.querySelector('.modal-backdrop').onclick = () => openModal(el.syncModal, false);
+
+  document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => { state.activeTab = tab.dataset.tab; save(); renderTabs(); });
+
+  el.addDayBtn.onclick = () => applyChange('Добавлен новый день', () => {
+    const newDay = { id: uid(), dateLabel: nextDateLabel(), title: 'Новый день', city: CITY.OSAKA, tasks: [] };
+    state.days.push(newDay);
+    state.selectedDayId = newDay.id;
+  });
+
+  el.resetBtn.onclick = () => applyChange('Сброс к базовому плану', () => {
+    state.days = makeDefaultDays();
+    state.selectedDayId = state.days[1]?.id || state.days[0]?.id;
+  });
+
+  el.kyotoNightBtn.onclick = () => applyChange('Добавлена ночёвка в Киото', () => {
+    const target = state.days.find((d) => d.title.includes('свободный') && d.city === CITY.OSAKA);
+    if (!target) return;
+    target.city = CITY.KYOTO;
+    target.title = 'Киото (ночёвка)';
+  });
+
+  el.connectSync.onclick = connectSync;
+  el.disconnectSync.onclick = disconnectSync;
+  fillSyncForm();
+  renderSyncStatus('Sync не подключен');
+
+  window.addEventListener('scroll', onScroll);
+  el.backToTop.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  render();
+  if (syncState.config?.apiKey) connectSync(true);
+}
+
+function onScroll() {
+  el.backToTop.classList.toggle('show', window.scrollY > 380);
+}
+
+function applyTheme() {
+  document.body.setAttribute('data-theme', state.theme === 'dark' ? 'dark' : 'light');
+}
+
+function render() {
+  renderSummary();
+  renderTimeline();
+  renderSelectedDay();
+  renderTabs();
+  renderSettingsDays();
+  renderActivityLog();
+  el.viewModeBtn.textContent = state.dayView === 'list' ? 'Таймлайн по часам' : 'Режим карточек';
+}
+
+function renderSummary() {
+  const map = new Map();
+  state.days.forEach((d) => map.set(d.city, (map.get(d.city) || 0) + 1));
+  el.summary.innerHTML = [...map.entries()].map(([city, c]) => `<span class="badge">${CITY_ICON[city]} ${city}: ${c}</span>`).join('');
+}
+
+function renderTimeline() {
+  const q = state.search.trim().toLowerCase();
+  const days = state.days.filter((d) => !q || `${d.dateLabel} ${d.title} ${d.city}`.toLowerCase().includes(q) || d.tasks.some((t) => `${t.time} ${t.title} ${t.notes} ${t.tag} ${t.mapUrl || ''}`.toLowerCase().includes(q)));
+  el.timeline.innerHTML = '';
+  days.forEach((d, i) => {
+    const card = document.createElement('button');
+    card.className = `day-card ${CITY_CLASS[d.city]} ${d.id === state.selectedDayId ? 'selected' : ''}`;
+    card.innerHTML = `<div class="day-top"><span>День ${i + 1}</span><span>${d.tasks.length} задач</span></div><div class="day-date">${d.dateLabel}</div><span class="badge badge-soft">${CITY_ICON[d.city]} ${d.city}</span><div class="day-title">${escapeHtml(d.title)}</div>${state.compact ? '' : renderDayPreview(d.tasks)}`;
+    card.onclick = () => patchState({ selectedDayId: d.id });
+    card.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+    card.ondrop = (e) => {
+      e.preventDefault();
+      const payload = parseJSON(e.dataTransfer.getData('text/plain'));
+      if (payload?.taskId && payload?.fromDayId) moveTask(payload.fromDayId, d.id, payload.taskId);
+    };
+    el.timeline.appendChild(card);
+  });
+}
+
+function renderDayPreview(tasks) {
+  if (!tasks.length) return '<div class="day-preview"><span>Нет задач</span></div>';
+  const rows = tasks.slice(0, 3).map((t) => `<span>${t.time ? `${t.time} · ` : ''}${escapeHtml(t.title || '(без названия)')}</span>`).join('');
+  return `<div class="day-preview">${rows}${tasks.length > 3 ? `<span>+ ещё ${tasks.length - 3}</span>` : ''}</div>`;
+}
+
+function renderSelectedDay() {
+  const day = state.days.find((d) => d.id === state.selectedDayId);
+  if (!day) {
+    el.dayHeader.textContent = 'Выберите день в ленте сверху.';
+    el.selectedCityBadge.textContent = '';
+    el.tasks.innerHTML = '';
+    return;
+  }
+
+  el.selectedCityBadge.innerHTML = `${CITY_ICON[day.city]} ${day.city}`;
+  el.dayHeader.innerHTML = `<b>${day.dateLabel} · ${escapeHtml(day.title)}</b><div class="muted">Перетаскивайте задачи между днями (drag&drop).</div>`;
+
+  if (state.dayView === 'timeline') {
+    renderHourTimeline(day);
+    return;
+  }
+
+  const sorted = [...day.tasks].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  el.tasks.innerHTML = '';
+  if (!sorted.length) {
+    el.tasks.innerHTML = '<div class="task muted">Пока задач нет. Нажмите «Добавить».</div>';
+    return;
+  }
+
+  sorted.forEach((task) => {
+    const node = document.createElement('div');
+    node.className = 'task';
+    node.draggable = true;
+    node.ondragstart = (e) => { node.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ fromDayId: day.id, taskId: task.id })); };
+    node.ondragend = () => node.classList.remove('dragging');
+    node.innerHTML = `<div class="task-grid"><input type="time" value="${escapeAttr(task.time || '')}" /><input type="text" placeholder="Задача" value="${escapeAttr(task.title || '')}" /><input type="text" placeholder="Google Maps URL" value="${escapeAttr(task.mapUrl || '')}" /><div><input type="text" placeholder="Тег" value="${escapeAttr(task.tag || '')}" /><button class="btn stretch">Удалить</button></div></div>${state.showNotes ? `<textarea placeholder="Заметки / билеты / станции / ссылки">${escapeHtml(task.notes || '')}</textarea>` : ''}<div class="task-foot">Перетаскивание: возьмите карточку и бросьте на другой день в ленте. ${task.mapUrl ? `<a href="${escapeAttr(task.mapUrl)}" target="_blank" rel="noreferrer" class="map-link">📍 Карта</a>` : ''}</div>`;
+
+    const [timeInput, titleInput, mapInput, tagInput, delBtn] = node.querySelectorAll('input, button');
+    const notes = node.querySelector('textarea');
+    timeInput.oninput = () => updateTask(day.id, task.id, { time: timeInput.value });
+    titleInput.oninput = () => updateTask(day.id, task.id, { title: titleInput.value });
+    mapInput.oninput = () => updateTask(day.id, task.id, { mapUrl: mapInput.value });
+    tagInput.oninput = () => updateTask(day.id, task.id, { tag: tagInput.value });
+    if (notes) notes.oninput = () => updateTask(day.id, task.id, { notes: notes.value });
+    delBtn.onclick = () => applyChange('Удалена задача', () => {
+      const d = state.days.find((x) => x.id === day.id);
+      d.tasks = d.tasks.filter((t) => t.id !== task.id);
+    });
+
+    el.tasks.appendChild(node);
+  });
+}
+
+function renderHourTimeline(day) {
+  const slots = [];
+  for (let h = 6; h <= 23; h += 1) slots.push(`${String(h).padStart(2, '0')}:00`);
+  const tasks = [...day.tasks];
+  el.tasks.innerHTML = `<div class="hour-timeline">${slots.map((slot) => {
+    const h = parseInt(slot.slice(0, 2), 10);
+    const inHour = tasks.filter((t) => {
+      const m = (t.time || '').match(/^(\d{2}):(\d{2})$/);
+      return m && Number(m[1]) === h;
+    });
+    return `<div class="hour-row"><div class="hour-label">${slot}</div><div class="hour-content">${inHour.length ? inHour.map((t) => `<div class="hour-task"><b>${escapeHtml(t.title || '(без названия)')}</b>${t.time ? ` · ${t.time}` : ''}${t.mapUrl ? ` · <a href="${escapeAttr(t.mapUrl)}" target="_blank" rel="noreferrer">Карта</a>` : ''}</div>`).join('') : ''}</div></div>`;
+  }).join('')}</div>`;
+}
+
+function renderTabs() {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === state.activeTab));
+  if (state.activeTab === 'moves') el.tabContent.innerHTML = `<div class="note"><b>Осака → Токио</b><br>Ночной автобус 09.09 21:00 → 10.09 07:00. Утро 10.09 лучше сделать лёгким.</div><div class="note"><b>Дейтрипы из Осаки</b><br>Нара — 1 день. Киото — 2–3 дня. Можно добавить 1 ночёвку в Киото.</div>`;
+  else if (state.activeTab === 'tickets') el.tabContent.innerHTML = `<div class="note"><b>Перелёт туда</b><br>31.08 21:05 LED → 01.09 18:00 KIX.</div><div class="note"><b>Перелёт обратно</b><br>16.09 08:40 HND (T3) → 16.09 19:05 LED.</div>`;
+  else el.tabContent.innerHTML = `<div class="note"><b>Что заранее</b><br>TeamLab/музеи, места в ночном автобусе, IC-карта (ICOCA/Suica).</div><div class="note"><b>Как работать с планом</b><br>Выберите день → добавьте задачи → переносите drag&drop → экспортируйте JSON.</div>`;
+}
+
+function renderSettingsDays() {
+  el.settingsDays.innerHTML = '';
+  state.days.forEach((d, i) => {
+    const item = document.createElement('div');
+    item.className = 'settings-item';
+    item.innerHTML = `<div class="top"><span>День ${i + 1} · ${d.dateLabel}</span><span>${CITY_ICON[d.city]} ${d.city}</span></div><div class="settings-row"><input type="text" value="${escapeAttr(d.dateLabel)}" placeholder="Дата (например 17.09)" /><select>${Object.values(CITY).map((c) => `<option value="${escapeAttr(c)}" ${c === d.city ? 'selected' : ''}>${CITY_ICON[c]} ${c}</option>`).join('')}</select></div><input type="text" value="${escapeAttr(d.title)}" placeholder="Заголовок дня" /><div class="settings-actions"><button class="btn">⬆️ Вверх</button><button class="btn">⬇️ Вниз</button><button class="btn">🗑 Удалить</button></div>`;
+
+    const [dateInput, citySelect, titleInput, upBtn, downBtn, delBtn] = item.querySelectorAll('input, select, button');
+    dateInput.onchange = () => applyChange('Изменена дата дня', () => { const day = getDay(d.id); day.dateLabel = dateInput.value || day.dateLabel; });
+    citySelect.onchange = () => applyChange('Изменен город дня', () => { const day = getDay(d.id); day.city = citySelect.value; });
+    titleInput.onchange = () => applyChange('Изменен заголовок дня', () => { const day = getDay(d.id); day.title = titleInput.value; });
+
+    upBtn.onclick = () => moveDay(i, i - 1);
+    downBtn.onclick = () => moveDay(i, i + 1);
+    delBtn.onclick = () => removeDay(d.id);
+
+    el.settingsDays.appendChild(item);
+  });
+}
+
+function renderActivityLog() {
+  if (!state.activityLog.length) {
+    el.activityLog.innerHTML = '<div class="activity-item muted">Пока действий нет.</div>';
+    return;
+  }
+  el.activityLog.innerHTML = [...state.activityLog].reverse().map((a) => `<div class="activity-item"><span class="activity-time">${a.time}</span>${escapeHtml(a.text)}</div>`).join('');
+}
+
+function applyChange(label, mutator) {
+  undoStack.push(snapshotState());
+  if (undoStack.length > 120) undoStack.shift();
+  redoStack.length = 0;
+  mutator();
+  addActivity(label);
+  save();
+  render();
+  pushSync();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshotState());
+  restoreSnapshot(undoStack.pop());
+  addActivity('Undo');
+  save();
+  render();
+  pushSync();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(snapshotState());
+  restoreSnapshot(redoStack.pop());
+  addActivity('Redo');
+  save();
+  render();
+  pushSync();
+}
+
+function addActivity(text) {
+  state.activityLog.push({ time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), text });
+  if (state.activityLog.length > 120) state.activityLog.shift();
+}
+
+function moveDay(fromIdx, toIdx) {
+  if (toIdx < 0 || toIdx >= state.days.length) return;
+  applyChange('Перемещен день', () => {
+    const [day] = state.days.splice(fromIdx, 1);
+    state.days.splice(toIdx, 0, day);
+  });
+}
+
+function removeDay(dayId) {
+  if (state.days.length <= 1) return;
+  applyChange('Удален день', () => {
+    const idx = state.days.findIndex((d) => d.id === dayId);
+    if (idx < 0) return;
+    state.days.splice(idx, 1);
+    if (state.selectedDayId === dayId) state.selectedDayId = state.days[Math.max(0, idx - 1)]?.id || state.days[0]?.id;
+  });
+}
+
+function moveTask(fromDayId, toDayId, taskId) {
+  if (fromDayId === toDayId) return;
+  applyChange('Перенос задачи между днями', () => {
+    const from = state.days.find((d) => d.id === fromDayId), to = state.days.find((d) => d.id === toDayId);
+    if (!from || !to) return;
+    const idx = from.tasks.findIndex((t) => t.id === taskId);
+    if (idx < 0) return;
+    const [task] = from.tasks.splice(idx, 1);
+    to.tasks.push(task);
+  });
+}
+
+function updateTask(dayId, taskId, patch) {
+  const day = state.days.find((d) => d.id === dayId);
+  if (!day) return;
+  day.tasks = day.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t));
+  save();
+  renderSelectedDay();
+  renderTimeline();
+  pushSync();
+}
+
+function patchState(patch) { Object.assign(state, patch); save(); render(); }
+function openModal(modal, show) { modal.classList.toggle('hidden', !show); }
+function getDay(id) { return state.days.find((d) => d.id === id); }
+function snapshotState() { return JSON.stringify({ ...state, activityLog: [...state.activityLog] }); }
+function restoreSnapshot(snapshot) { Object.assign(state, JSON.parse(snapshot)); applyTheme(); }
+
+async function connectSync(silent = false) {
+  try {
+    const cfg = {
+      apiKey: (el.fbApiKey.value || syncState.config.apiKey || '').trim(),
+      authDomain: (el.fbAuthDomain.value || syncState.config.authDomain || '').trim(),
+      databaseURL: (el.fbDbUrl.value || syncState.config.databaseURL || '').trim(),
+      projectId: (el.fbProjectId.value || syncState.config.projectId || '').trim(),
+      appId: (el.fbAppId.value || syncState.config.appId || '').trim(),
+      path: (el.fbPath.value || syncState.config.path || 'sharedPlanner').trim(),
+    };
+    if (!cfg.apiKey || !cfg.databaseURL || !cfg.projectId || !cfg.appId) {
+      renderSyncStatus('Заполните Firebase config поля');
+      return;
+    }
+    saveSyncConfig(cfg);
+    syncState.config = cfg;
+
+    const appMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js');
+    const dbMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js');
+
+    disconnectSync(true);
+    syncState.app = appMod.initializeApp(cfg, 'trip-planner-' + Math.random().toString(16).slice(2, 8));
+    syncState.db = dbMod.getDatabase(syncState.app);
+    syncState.ref = dbMod.ref(syncState.db, `${cfg.path}/state`);
+
+    syncState.unsub = dbMod.onValue(syncState.ref, (snap) => {
+      const remote = snap.val();
+      if (!remote?.state || !remote?.updatedAt) return;
+      if (remote.clientId === clientId) return;
+      if (remote.updatedAt <= syncState.lastRemoteTs) return;
+      syncState.lastRemoteTs = remote.updatedAt;
+      syncState.mutePush = true;
+      Object.assign(state, remote.state);
+      if (!state.selectedDayId) state.selectedDayId = state.days[0]?.id || null;
+      applyTheme();
+      save(); render();
+      syncState.mutePush = false;
+      renderSyncStatus('Sync подключен: получены изменения');
+    });
+
+    syncState.connected = true;
+    renderSyncStatus('Sync подключен');
+    if (!silent) openModal(el.syncModal, false);
+    pushSync();
+  } catch {
+    renderSyncStatus('Ошибка подключения Sync');
+  }
+}
+
+function disconnectSync(silent = false) {
+  try { if (syncState.unsub) syncState.unsub(); } catch {}
+  syncState.connected = false;
+  syncState.unsub = null;
+  if (!silent) renderSyncStatus('Sync отключен');
+}
+
+async function pushSync() {
+  if (!syncState.connected || syncState.mutePush || !syncState.ref || !syncState.db) return;
+  try {
+    const dbMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js');
+    await dbMod.set(syncState.ref, { updatedAt: Date.now(), clientId, state });
+  } catch {
+    renderSyncStatus('Не удалось отправить изменения в cloud');
+  }
+}
+
+function fillSyncForm() {
+  const c = syncState.config || {};
+  el.fbApiKey.value = c.apiKey || '';
+  el.fbAuthDomain.value = c.authDomain || '';
+  el.fbDbUrl.value = c.databaseURL || '';
+  el.fbProjectId.value = c.projectId || '';
+  el.fbAppId.value = c.appId || '';
+  el.fbPath.value = c.path || 'sharedPlanner';
+}
+function renderSyncStatus(text) { el.syncStatus.textContent = text; }
+
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'japan-trip-planner.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importJSON(e) {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const parsed = parseJSON(String(reader.result));
+    if (!parsed?.days?.length) return;
+    undoStack.push(snapshotState());
+    Object.assign(state, parsed);
+    if (!state.selectedDayId) state.selectedDayId = state.days[0]?.id;
+    if (!state.theme) state.theme = 'light';
+    if (!state.dayView) state.dayView = 'list';
+    if (!Array.isArray(state.activityLog)) state.activityLog = [];
+    addActivity('Импортирован JSON');
+    applyTheme();
+    save(); render(); pushSync();
+  };
+  reader.readAsText(f);
+  e.target.value = '';
+}
+
+function nextDateLabel() {
+  const last = state.days[state.days.length - 1]?.dateLabel || '01.01';
+  const m = last.match(/^(\d{1,2})\.(\d{1,2})$/);
+  if (!m) return last;
+  let d = parseInt(m[1], 10) + 1;
+  let mo = parseInt(m[2], 10);
+  if (d > 31) { d = 1; mo += 1; }
+  if (mo > 12) mo = 1;
+  return `${String(d).padStart(2, '0')}.${String(mo).padStart(2, '0')}`;
+}
+
+function makeDefaultDays() {
+  const data = [
+    ['31.08', 'Вылет', CITY.FLIGHT], ['01.09', 'Прилёт KIX + Дотонбори', CITY.OSAKA], ['02.09', 'Осака центр', CITY.OSAKA],
+    ['03.09', 'Осака юг', CITY.OSAKA], ['04.09', 'Нара (day trip)', CITY.NARA], ['05.09', 'Киото восток', CITY.KYOTO],
+    ['06.09', 'Киото Арасияма', CITY.KYOTO], ['07.09', 'Киото север / спокойный день', CITY.KYOTO], ['08.09', 'Осака (свободный день)', CITY.OSAKA],
+    ['09.09', 'Осака → Токио (автобус 21:00)', CITY.BUS], ['10.09', 'Токио (07:00 прибытие)', CITY.TOKYO],
+    ['11.09', 'Shibuya + Harajuku + Shinjuku', CITY.TOKYO], ['12.09', 'Odaiba / TeamLab', CITY.TOKYO],
+    ['13.09', 'Выезд: Hakone / Fuji', CITY.TOKYO], ['14.09', 'Выезд: Kamakura / Nikko', CITY.TOKYO],
+    ['15.09', 'Токио (финальный свободный)', CITY.TOKYO], ['16.09', 'Вылет HND 08:40', CITY.FLIGHT],
+  ];
+  return data.map(([dateLabel, title, city], idx) => ({ id: uid(), dateLabel, title, city, tasks: seedTasks(idx) }));
+}
+
+function seedTasks(i) {
+  if (i === 1) return [makeTask('19:30', 'Дорога KIX → Нанба', 'Nankai / Limousine Bus', 'логистика', 'https://maps.google.com/?q=Namba+Station'), makeTask('21:00', 'Дотонбори — лёгкая прогулка', 'без плотного плана', 'вечер', 'https://maps.google.com/?q=Dotonbori')];
+  if (i === 2) return [makeTask('09:00', 'Osaka Castle', 'музей внутри', 'must', 'https://maps.google.com/?q=Osaka+Castle'), makeTask('18:00', 'Umeda Sky Building', 'закат/ночной вид', 'view', 'https://maps.google.com/?q=Umeda+Sky+Building')];
+  if (i === 9) return [makeTask('21:00', 'Ночной автобус Осака → Токио', 'прибытие ~07:00', 'логистика')];
+  if (i === 16) return [makeTask('05:45', 'Выезд в HND', 'запас времени', 'логистика', 'https://maps.google.com/?q=Haneda+Airport')];
+  return [];
+}
+
+function makeTask(time = '', title = '', notes = '', tag = '', mapUrl = '') { return { id: uid(), time, title, notes, tag, mapUrl }; }
+function byId(id) { return document.getElementById(id); }
+function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
+function parseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
+function load() { return parseJSON(localStorage.getItem(STORE_KEY)); }
+function save() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function loadSyncConfig() { return parseJSON(localStorage.getItem(SYNC_KEY)) || {}; }
+function saveSyncConfig(cfg) { localStorage.setItem(SYNC_KEY, JSON.stringify(cfg)); }
+function escapeHtml(s) { return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'); }
+function escapeAttr(s) { return escapeHtml(s).replaceAll('"', '&quot;'); }
