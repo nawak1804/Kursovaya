@@ -4,11 +4,19 @@ const CITY = {
 const CITY_ICON = { [CITY.OSAKA]:'🏮',[CITY.KYOTO]:'⛩️',[CITY.NARA]:'🦌',[CITY.TOKYO]:'🗼',[CITY.BUS]:'🚌',[CITY.FLIGHT]:'✈️' };
 const CITY_CLASS = { [CITY.OSAKA]:'city-osaka',[CITY.KYOTO]:'city-kyoto',[CITY.NARA]:'city-nara',[CITY.TOKYO]:'city-tokyo',[CITY.BUS]:'city-bus',[CITY.FLIGHT]:'city-flight' };
 
-const STORE_KEY = 'jp_planner_v3';
+const STORE_KEY = 'jp_planner_v4';
 const SYNC_KEY = 'jp_planner_sync_cfg';
 const clientId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
 
-const state = load() || { compact:false, showNotes:true, search:'', activeTab:'moves', selectedDayId:null, days:makeDefaultDays() };
+const state = load() || {
+  compact:false,
+  showNotes:true,
+  search:'',
+  activeTab:'moves',
+  theme:'light',
+  selectedDayId:null,
+  days:makeDefaultDays(),
+};
 if (!state.selectedDayId) state.selectedDayId = state.days[1]?.id || state.days[0]?.id;
 
 const syncState = {
@@ -23,11 +31,12 @@ const syncState = {
 };
 
 const el = {
+  themeToggle: byId('themeToggle'),
   compact: byId('compact'), showNotes: byId('showNotes'), search: byId('search'), exportBtn: byId('exportBtn'),
   importInput: byId('importInput'), settingsBtn: byId('settingsBtn'), summary: byId('summary'), timeline: byId('timeline'),
   selectedCityBadge: byId('selectedCityBadge'), addTaskBtn: byId('addTaskBtn'), dayHeader: byId('dayHeader'), tasks: byId('tasks'),
   tabContent: byId('tabContent'), settingsModal: byId('settingsModal'), closeSettings: byId('closeSettings'), settingsDays: byId('settingsDays'),
-  resetBtn: byId('resetBtn'), kyotoNightBtn: byId('kyotoNightBtn'), syncBtn: byId('syncBtn'), syncModal: byId('syncModal'),
+  addDayBtn: byId('addDayBtn'), resetBtn: byId('resetBtn'), kyotoNightBtn: byId('kyotoNightBtn'), syncBtn: byId('syncBtn'), syncModal: byId('syncModal'),
   closeSync: byId('closeSync'), fbApiKey: byId('fbApiKey'), fbAuthDomain: byId('fbAuthDomain'), fbDbUrl: byId('fbDbUrl'),
   fbProjectId: byId('fbProjectId'), fbAppId: byId('fbAppId'), fbPath: byId('fbPath'), connectSync: byId('connectSync'),
   disconnectSync: byId('disconnectSync'), syncStatus: byId('syncStatus'),
@@ -36,10 +45,17 @@ const el = {
 init();
 
 function init() {
+  applyTheme();
+  el.themeToggle.checked = state.theme === 'dark';
   el.compact.checked = state.compact;
   el.showNotes.checked = state.showNotes;
   el.search.value = state.search;
 
+  el.themeToggle.onchange = () => {
+    state.theme = el.themeToggle.checked ? 'dark' : 'light';
+    save();
+    applyTheme();
+  };
   el.compact.onchange = () => patchState({ compact: el.compact.checked });
   el.showNotes.onchange = () => patchState({ showNotes: el.showNotes.checked });
   el.search.oninput = () => patchState({ search: el.search.value });
@@ -57,6 +73,13 @@ function init() {
 
   document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => { state.activeTab = tab.dataset.tab; save(); renderTabs(); });
 
+  el.addDayBtn.onclick = () => {
+    const newDay = { id: uid(), dateLabel: nextDateLabel(), title: 'Новый день', city: CITY.OSAKA, tasks: [] };
+    state.days.push(newDay);
+    state.selectedDayId = newDay.id;
+    save(); render(); pushSync();
+  };
+
   el.resetBtn.onclick = () => {
     state.days = makeDefaultDays();
     state.selectedDayId = state.days[1]?.id || state.days[0]?.id;
@@ -66,7 +89,7 @@ function init() {
     const target = state.days.find((d) => d.title.includes('свободный') && d.city === CITY.OSAKA);
     if (!target) return;
     target.city = CITY.KYOTO; target.title = 'Киото (ночёвка)';
-    save(); render(); pushSync(); renderSettingsDays();
+    save(); render(); pushSync();
   };
 
   el.connectSync.onclick = connectSync;
@@ -78,7 +101,17 @@ function init() {
   if (syncState.config?.apiKey) connectSync(true);
 }
 
-function render() { renderSummary(); renderTimeline(); renderSelectedDay(); renderTabs(); renderSettingsDays(); }
+function applyTheme() {
+  document.body.setAttribute('data-theme', state.theme === 'dark' ? 'dark' : 'light');
+}
+
+function render() {
+  renderSummary();
+  renderTimeline();
+  renderSelectedDay();
+  renderTabs();
+  renderSettingsDays();
+}
 function renderSummary() {
   const map = new Map();
   state.days.forEach((d) => map.set(d.city, (map.get(d.city) || 0) + 1));
@@ -109,7 +142,12 @@ function renderDayPreview(tasks) {
 }
 function renderSelectedDay() {
   const day = state.days.find((d) => d.id === state.selectedDayId);
-  if (!day) { el.dayHeader.textContent = 'Выберите день в ленте сверху.'; el.selectedCityBadge.textContent = ''; el.tasks.innerHTML = ''; return; }
+  if (!day) {
+    el.dayHeader.textContent = 'Выберите день в ленте сверху.';
+    el.selectedCityBadge.textContent = '';
+    el.tasks.innerHTML = '';
+    return;
+  }
 
   el.selectedCityBadge.innerHTML = `${CITY_ICON[day.city]} ${day.city}`;
   el.dayHeader.innerHTML = `<b>${day.dateLabel} · ${escapeHtml(day.title)}</b><div class="muted">Перетаскивайте задачи между днями (drag&drop).</div>`;
@@ -124,7 +162,7 @@ function renderSelectedDay() {
     node.draggable = true;
     node.ondragstart = (e) => { node.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ fromDayId: day.id, taskId: task.id })); };
     node.ondragend = () => node.classList.remove('dragging');
-    node.innerHTML = `<div class="task-grid"><input type="time" value="${escapeAttr(task.time || '')}" /><input type="text" placeholder="Задача" value="${escapeAttr(task.title || '')}" /><div><input type="text" placeholder="Тег" value="${escapeAttr(task.tag || '')}" /><button class="btn btn-ghost stretch">Удалить</button></div></div>${state.showNotes ? `<textarea placeholder="Заметки / билеты / станции / ссылки">${escapeHtml(task.notes || '')}</textarea>` : ''}<div class="task-foot">Перетаскивание: возьмите карточку и бросьте на другой день в ленте.</div>`;
+    node.innerHTML = `<div class="task-grid"><input type="time" value="${escapeAttr(task.time || '')}" /><input type="text" placeholder="Задача" value="${escapeAttr(task.title || '')}" /><div><input type="text" placeholder="Тег" value="${escapeAttr(task.tag || '')}" /><button class="btn stretch">Удалить</button></div></div>${state.showNotes ? `<textarea placeholder="Заметки / билеты / станции / ссылки">${escapeHtml(task.notes || '')}</textarea>` : ''}<div class="task-foot">Перетаскивание: возьмите карточку и бросьте на другой день в ленте.</div>`;
 
     const [timeInput, titleInput, tagInput, delBtn] = node.querySelectorAll('input, button');
     const notes = node.querySelector('textarea');
@@ -147,12 +185,47 @@ function renderSettingsDays() {
   state.days.forEach((d, i) => {
     const item = document.createElement('div');
     item.className = 'settings-item';
-    item.innerHTML = `<div class="top"><span>День ${i + 1} · ${d.dateLabel}</span><span>${CITY_ICON[d.city]} ${d.city}</span></div><select>${Object.values(CITY).map((c) => `<option value="${escapeAttr(c)}" ${c === d.city ? 'selected' : ''}>${CITY_ICON[c]} ${c}</option>`).join('')}</select><input type="text" value="${escapeAttr(d.title)}" placeholder="Заголовок дня" />`;
-    const [sel, input] = item.querySelectorAll('select, input');
-    sel.onchange = () => mutateDay(d.id, (day) => (day.city = sel.value));
-    input.oninput = () => mutateDay(d.id, (day) => (day.title = input.value));
+    item.innerHTML = `
+      <div class="top"><span>День ${i + 1} · ${d.dateLabel}</span><span>${CITY_ICON[d.city]} ${d.city}</span></div>
+      <div class="settings-row">
+        <input type="text" value="${escapeAttr(d.dateLabel)}" placeholder="Дата (например 17.09)" />
+        <select>${Object.values(CITY).map((c) => `<option value="${escapeAttr(c)}" ${c === d.city ? 'selected' : ''}>${CITY_ICON[c]} ${c}</option>`).join('')}</select>
+      </div>
+      <input type="text" value="${escapeAttr(d.title)}" placeholder="Заголовок дня" />
+      <div class="settings-actions">
+        <button class="btn">⬆️ Вверх</button>
+        <button class="btn">⬇️ Вниз</button>
+        <button class="btn">🗑 Удалить</button>
+      </div>
+    `;
+
+    const [dateInput, citySelect, titleInput, upBtn, downBtn, delBtn] = item.querySelectorAll('input, select, button');
+    dateInput.oninput = () => mutateDay(d.id, (day) => (day.dateLabel = dateInput.value || day.dateLabel));
+    citySelect.onchange = () => mutateDay(d.id, (day) => (day.city = citySelect.value));
+    titleInput.oninput = () => mutateDay(d.id, (day) => (day.title = titleInput.value));
+
+    upBtn.onclick = () => moveDay(i, i - 1);
+    downBtn.onclick = () => moveDay(i, i + 1);
+    delBtn.onclick = () => removeDay(d.id);
+
     el.settingsDays.appendChild(item);
   });
+}
+
+function moveDay(fromIdx, toIdx) {
+  if (toIdx < 0 || toIdx >= state.days.length) return;
+  const [day] = state.days.splice(fromIdx, 1);
+  state.days.splice(toIdx, 0, day);
+  save(); render(); pushSync();
+}
+
+function removeDay(dayId) {
+  if (state.days.length <= 1) return;
+  const idx = state.days.findIndex((d) => d.id === dayId);
+  if (idx < 0) return;
+  state.days.splice(idx, 1);
+  if (state.selectedDayId === dayId) state.selectedDayId = state.days[Math.max(0, idx - 1)]?.id || state.days[0]?.id;
+  save(); render(); pushSync();
 }
 
 function moveTask(fromDayId, toDayId, taskId) {
@@ -172,7 +245,9 @@ function mutateDay(dayId, mutator, rerender = true) {
   const day = state.days.find((d) => d.id === dayId);
   if (!day) return;
   mutator(day);
-  save(); if (rerender) render(); pushSync();
+  save();
+  if (rerender) render();
+  pushSync();
 }
 function patchState(patch) { Object.assign(state, patch); save(); render(); }
 function openModal(modal, show) { modal.classList.toggle('hidden', !show); }
@@ -211,6 +286,7 @@ async function connectSync(silent = false) {
       syncState.mutePush = true;
       Object.assign(state, remote.state);
       if (!state.selectedDayId) state.selectedDayId = state.days[0]?.id || null;
+      applyTheme();
       save(); render();
       syncState.mutePush = false;
       renderSyncStatus('Sync подключен: получены изменения');
@@ -220,7 +296,7 @@ async function connectSync(silent = false) {
     renderSyncStatus('Sync подключен');
     if (!silent) openModal(el.syncModal, false);
     pushSync();
-  } catch (e) {
+  } catch {
     renderSyncStatus('Ошибка подключения Sync');
   }
 }
@@ -269,10 +345,23 @@ function importJSON(e) {
     if (!parsed?.days?.length) return;
     Object.assign(state, parsed);
     if (!state.selectedDayId) state.selectedDayId = state.days[0]?.id;
+    if (!state.theme) state.theme = 'light';
+    applyTheme();
     save(); render(); pushSync();
   };
   reader.readAsText(f);
   e.target.value = '';
+}
+
+function nextDateLabel() {
+  const last = state.days[state.days.length - 1]?.dateLabel || '01.01';
+  const m = last.match(/^(\d{1,2})\.(\d{1,2})$/);
+  if (!m) return last;
+  let d = parseInt(m[1], 10) + 1;
+  let mo = parseInt(m[2], 10);
+  if (d > 31) { d = 1; mo += 1; }
+  if (mo > 12) mo = 1;
+  return `${String(d).padStart(2, '0')}.${String(mo).padStart(2, '0')}`;
 }
 
 function makeDefaultDays() {

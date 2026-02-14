@@ -15,6 +15,7 @@
         </div>
 
         <div class="header-actions">
+          <label class="toggle-pill"><span>Тёмная тема</span><input id="themeToggle" type="checkbox" /></label>
           <label class="toggle-pill"><span>Компактно</span><input id="compact" type="checkbox" /></label>
           <label class="toggle-pill"><span>Заметки</span><input id="showNotes" type="checkbox" checked /></label>
           <input id="search" class="input" type="text" placeholder="Поиск: Киото, 09:00, castle" />
@@ -67,8 +68,11 @@
       <div class="modal-backdrop"></div>
       <div class="modal-body card">
         <div class="modal-head">
-          <h2>Настроить дни (город и заголовок)</h2>
-          <button id="closeSettings" class="btn btn-ghost">Закрыть</button>
+          <h2>Настроить дни (добавлять, удалять, двигать, редактировать)</h2>
+          <div class="modal-head-actions">
+            <button id="addDayBtn" class="btn btn-main">+ Добавить день</button>
+            <button id="closeSettings" class="btn btn-ghost">Закрыть</button>
+          </div>
         </div>
 
         <div class="modal-grid">
@@ -81,7 +85,7 @@
             </div>
             <div class="card inner-card">
               <h3>Пояснение</h3>
-              <p>Интерфейс максимально приближен к travel-planner: карточки, табы, редактирование и drag&drop.</p>
+              <p>В карточке каждого дня можно менять дату/заголовок/город, двигать вверх/вниз и удалять день.</p>
             </div>
           </div>
         </div>
