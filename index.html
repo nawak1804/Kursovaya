@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Japan Trip Planner</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="card glass header-card">
+        <div>
+          <h1>Japan Trip Planner</h1>
+          <p>31.08 → 16.09 · Осака → (ночной автобус) → Токио</p>
+        </div>
+        <div class="rating-chip">⭐ Общий рейтинг: <b id="overallRating">0.0</b></div>
+
+        <div class="header-actions">
+          <label class="toggle-pill"><span>Тёмная тема</span><input id="themeToggle" type="checkbox" /></label>
+          <label class="toggle-pill"><span>Компактно</span><input id="compact" type="checkbox" /></label>
+          <label class="toggle-pill"><span>Заметки</span><input id="showNotes" type="checkbox" checked /></label>
+          <input id="search" class="input" type="text" placeholder="Поиск: Киото, 09:00, castle" />
+          <button id="exportBtn" class="btn btn-ghost">Экспорт</button>
+          <label class="btn btn-ghost file-label">Импорт<input id="importInput" type="file" accept="application/json" /></label>
+          <button id="syncBtn" class="btn btn-ghost">Cloud Sync</button>
+          <button id="settingsBtn" class="btn btn-main">Настроить дни</button>
+        </div>
+      </header>
+
+      <section class="card glass widgets-grid">
+        <div>
+          <h2>Онлайн часы</h2>
+          <div class="clock-row">
+            <div class="clock-box"><div class="clock-title">Москва (MSK)</div><canvas id="clockMsk" width="160" height="160"></canvas><div id="timeMsk" class="muted"></div></div>
+            <div class="clock-box"><div class="clock-title">Япония (JST)</div><canvas id="clockJst" width="160" height="160"></canvas><div id="timeJst" class="muted"></div></div>
+          </div>
+        </div>
+        <div>
+          <h2>Радио (русское)</h2>
+          <div class="radio-box">
+            <select id="radioSelect" class="input full">
+              <option value="https://nashe1.hostingradio.ru/nashe-256">Наше Радио</option>
+              <option value="https://pub0302.101.ru:8443/stream/trust_128">Радио Рекорд</option>
+              <option value="https://emgregion.hostingradio.ru:8064/moscow.europaplus.mp3">Europa Plus</option>
+            </select>
+            <audio id="radioPlayer" controls class="full"></audio>
+          </div>
+        </div>
+      </section>
+
+      <section class="card glass">
+        <h2>Обои интерфейса</h2>
+        <div id="wallpaperBtns" class="wallpapers"></div>
+        <label class="btn btn-ghost file-label">Загрузить свои обои<input id="wallpaperUpload" type="file" accept="image/*" /></label>
+      </section>
+
+      <section class="card glass">
+        <h2>Распределение по городам</h2>
+        <div id="summary" class="summary"></div>
+      </section>
+
+      <section class="card glass">
+        <h2>Календарная лента</h2>
+        <div id="timeline" class="timeline"></div>
+      </section>
+
+      <main class="main-grid">
+        <section class="card glass">
+          <div class="panel-top">
+            <h2>Задачи дня</h2>
+            <div class="panel-top-right">
+              <span id="selectedCityBadge" class="badge badge-soft"></span>
+              <button id="viewModeBtn" class="btn">Таймлайн по часам</button>
+              <button id="addTaskBtn" class="btn btn-main">+ Добавить</button>
+            </div>
+          </div>
+
+          <div id="dayHeader" class="day-header muted">Выберите день в ленте сверху.</div>
+          <div id="tasks" class="task-list"></div>
+        </section>
+
+        <aside class="card glass">
+          <h2>Памятка / логистика</h2>
+          <div class="tabs">
+            <button class="tab active" data-tab="moves">Переезды</button>
+            <button class="tab" data-tab="tickets">Билеты</button>
+            <button class="tab" data-tab="tips">Советы</button>
+          </div>
+          <div id="tabContent" class="tab-content"></div>
+        </aside>
+      </main>
+
+      <section class="card glass">
+        <div class="panel-top">
+          <h2>История изменений</h2>
+          <div class="panel-top-right">
+            <button id="undoBtn" class="btn">↶ Undo</button>
+            <button id="redoBtn" class="btn">↷ Redo</button>
+          </div>
+        </div>
+        <div id="activityLog" class="activity-log"></div>
+      </section>
+
+      <section class="card glass">
+        <h2>Отзывы и комментарии</h2>
+        <div class="comment-form">
+          <input id="commentName" class="input" placeholder="Ваше имя" />
+          <select id="commentRating" class="input"><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select>
+          <input id="commentText" class="input wide" placeholder="Комментарий" />
+          <button id="addCommentBtn" class="btn btn-main">Отправить</button>
+        </div>
+        <div id="commentList" class="comment-list"></div>
+      </section>
+
+      <p class="hint">Подсказка: перетаскивайте карточки задач между днями через верхнюю ленту.</p>
+    </div>
+
+    <button id="backToTop" class="back-to-top" aria-label="Наверх">↑</button>
+    <aside id="sideAd" class="ad ad-side glass hidden"><button class="ad-close" data-ad="side">✕</button><b>Реклама</b><p>Премиум-гид по Японии: скидка 25%.</p></aside>
+    <div id="bottomAd" class="ad ad-bottom glass hidden"><button class="ad-close" data-ad="bottom">✕</button><b>Реклама</b> Бронируй JR/отели с кэшбэком.</div>
+    <div id="fullscreenNudge" class="fullscreen-nudge hidden">
+      <div class="nudge-box glass"><h3>Пожалуйста, отключите AdBlock</h3><p>С включенным блокировщиком рекламы мы не получаем доход для развития сервиса.</p><button id="closeNudge" class="btn btn-main">Понятно</button></div>
+    </div>
+
+    <div id="settingsModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-body card glass">
+        <div class="modal-head">
+          <h2>Настроить дни (добавлять, удалять, двигать, редактировать)</h2>
+          <div class="modal-head-actions">
+            <button id="addDayBtn" class="btn btn-main">+ Добавить день</button>
+            <button id="closeSettings" class="btn btn-ghost">Закрыть</button>
+          </div>
+        </div>
+
+        <div class="modal-grid">
+          <div id="settingsDays" class="settings-days"></div>
+          <div class="settings-side">
+            <div class="card glass inner-card">
+              <h3>Шаблоны</h3>
+              <button id="resetBtn" class="btn btn-ghost stretch">Сбросить к базовому плану</button>
+              <button id="kyotoNightBtn" class="btn btn-ghost stretch">Опция: добавить ночёвку в Киото</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="syncModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-body card glass">
+        <div class="modal-head">
+          <h2>Cloud Sync (общие изменения для всех)</h2>
+          <button id="closeSync" class="btn btn-ghost">Закрыть</button>
+        </div>
+        <div class="sync-grid">
+          <input id="fbApiKey" class="input" placeholder="apiKey" />
+          <input id="fbAuthDomain" class="input" placeholder="authDomain" />
+          <input id="fbDbUrl" class="input" placeholder="databaseURL" />
+          <input id="fbProjectId" class="input" placeholder="projectId" />
+          <input id="fbAppId" class="input" placeholder="appId" />
+          <input id="fbPath" class="input" placeholder="sharedPlanner (путь)" />
+        </div>
+        <div class="sync-actions">
+          <button id="connectSync" class="btn btn-main">Подключить Sync</button>
+          <button id="disconnectSync" class="btn btn-ghost">Отключить</button>
+          <span id="syncStatus" class="muted"></span>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
