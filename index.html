@@ -16,16 +16,15 @@
           <h1>Japan Trip Planner</h1>
           <p>31.08 → 16.09 · Осака → (ночной автобус) → Токио</p>
         </div>
-        <div class="header-meta">
-          <div class="rating-chip">⭐ Рейтинг: <b id="overallRating">0.0</b></div>
-          <div class="rating-chip">👥 Онлайн: <b id="onlineCount">512</b></div>
+        <div class="top-pills">
+          <div class="pill">⭐ Рейтинг: <b id="overallRating">0.0</b></div>
+          <div class="pill">👥 Онлайн: <b id="onlineCount">500</b></div>
           <button id="notifSoundBtn" class="btn">🔊 Звук уведомлений</button>
         </div>
-
         <div class="header-actions">
           <label class="toggle-pill"><span>Тёмная тема</span><input id="themeToggle" type="checkbox" /></label>
-          <label class="toggle-pill"><span>Компактно</span><input id="compact" type="checkbox" /></label>
-          <input id="search" class="input" type="text" placeholder="Поиск" />
+          <label class="toggle-pill"><span>Компактно</span><input id="compactToggle" type="checkbox" /></label>
+          <input id="searchInput" class="input" type="text" placeholder="Поиск по дням/задачам" />
           <button id="exportBtn" class="btn">Экспорт</button>
           <label class="btn file-label">Импорт<input id="importInput" type="file" accept="application/json" /></label>
         </div>
@@ -33,21 +32,18 @@
 
       <section class="card glass widgets-grid">
         <div>
-          <h2>Онлайн часы + Компас</h2>
+          <h2>Часы и компас</h2>
           <div class="clock-row">
-            <div class="clock-box"><div>MSK</div><canvas id="clockMsk" width="130" height="130"></canvas><div id="timeMsk" class="muted"></div></div>
-            <div class="clock-box"><div>JST</div><canvas id="clockJst" width="130" height="130"></canvas><div id="timeJst" class="muted"></div></div>
-            <div class="clock-box"><div>Компас</div><div id="compass" class="compass">🧭<span id="northLabel">N</span></div><div id="geoText" class="muted">геолокация...</div></div>
+            <div class="clock-box"><div>Москва</div><canvas id="clockMsk" width="130" height="130"></canvas><div id="timeMsk" class="muted"></div></div>
+            <div class="clock-box"><div>Япония</div><canvas id="clockJst" width="130" height="130"></canvas><div id="timeJst" class="muted"></div></div>
+            <div class="clock-box"><div>Компас</div><div id="compass" class="compass">🧭<span>N</span></div><div id="geoText" class="muted">геолокация...</div></div>
           </div>
         </div>
         <div>
           <h2>Радио РФ</h2>
           <div class="radio-widget">
-            <div class="station-card">
-              <div class="station-art" id="stationArt">📻</div>
-              <div><b id="stationName">Наше Радио</b><div class="muted">Онлайн эфир</div></div>
-            </div>
-            <canvas id="eqCanvas" width="560" height="100"></canvas>
+            <div class="station-card"><div id="stationArt" class="station-art">📻</div><div><b id="stationName">Станция</b><div class="muted">Онлайн</div></div></div>
+            <canvas id="eqCanvas" width="560" height="90"></canvas>
             <div class="radio-controls">
               <button id="prevStation" class="btn">⏮</button>
               <button id="playPause" class="btn btn-main">▶</button>
@@ -55,7 +51,7 @@
               <input id="volumeRange" type="range" min="0" max="1" step="0.01" value="0.6" />
             </div>
             <select id="radioSelect" class="input full"></select>
-            <audio id="radioPlayer" class="full"></audio>
+            <audio id="radioPlayer" preload="none"></audio>
           </div>
         </div>
       </section>
@@ -71,25 +67,25 @@
             <h2>Задачи дня</h2>
             <div class="panel-top-right">
               <button id="viewModeBtn" class="btn">Таймлайн по часам</button>
-              <button id="addTaskBtn" class="btn btn-main">+ Добавить</button>
+              <button id="addTaskBtn" class="btn btn-main">+ Добавить задачу</button>
             </div>
           </div>
-          <div id="dayHeader" class="muted">Выберите день</div>
-          <div id="tasks" class="task-list"></div>
+          <div id="dayHeader" class="muted">Выберите день в ленте</div>
+          <div id="tasksList" class="task-list"></div>
         </section>
 
         <aside class="card glass">
           <h2>Счётчик Гейгера</h2>
           <div id="geigerValue" class="geiger-value">0.22 μSv/h</div>
-          <div id="geigerBar" class="geiger-bar"><span></span></div>
-          <p class="muted">При наведении на крестик рекламы радиация зашкаливает.</p>
+          <div class="geiger-bar"><span id="geigerBarFill"></span></div>
+          <p class="muted">Наведите курсор на крестик рекламы — будет всплеск.</p>
         </aside>
       </main>
 
       <section class="card glass">
         <h2>Отзывы</h2>
         <div class="comment-form">
-          <input id="commentName" class="input" placeholder="Имя" />
+          <input id="commentName" class="input" placeholder="Ваше имя" />
           <select id="commentRating" class="input"><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select>
           <input id="commentText" class="input wide" placeholder="Комментарий" />
           <button id="addCommentBtn" class="btn btn-main">Отправить</button>
@@ -102,10 +98,10 @@
 
     <aside id="sideAd" class="ad ad-side glass">
       <button class="ad-close" data-ad="side">✕</button>
-      <h3>🔥 Срочно: ваш ПК под риском</h3>
-      <p>Скачать антивирус пока вас не взломали. Читать далее. Читать в источнике.</p>
+      <h3>⚠️ Внимание! Ваш ПК под риском</h3>
+      <p>Скачать антивирус, пока вас не взломали. Читать далее / читать в источнике.</p>
       <div class="ad-image">🛡️</div>
-      <a href="#">Читать в источнике</a>
+      <p><a href="#">Читать далее</a> · <a href="#">Читать в источнике</a></p>
     </aside>
 
     <div id="bottomAd" class="ad ad-bottom glass">
@@ -113,24 +109,24 @@
       <div class="ad-content">
         <div class="ad-image big">🚨</div>
         <div>
-          <h3>Огромная рекламная акция</h3>
-          <p>Супер-предложение на туры, страховку, защиту устройства и билеты. Нажмите чтобы узнать больше, скачать и обезопасить данные уже сейчас.</p>
+          <h3>Супер акция и важное объявление</h3>
+          <p>Большой рекламный блок: билеты, страховка, отели, защита устройства, выгодные пакеты. Нажмите и узнайте больше прямо сейчас.</p>
         </div>
       </div>
     </div>
 
     <div id="fullscreenNudge" class="fullscreen-nudge hidden">
       <div class="nudge-box glass">
-        <h3>Отключите AdBlock</h3>
-        <p>С включённым блокировщиком мы не получаем денег на развитие сервиса.</p>
+        <h3>Пожалуйста, отключите AdBlock</h3>
+        <p>С блокировщиком рекламы мы не получаем деньги на развитие сервиса.</p>
         <button id="closeNudge" class="btn btn-main">Закрыть</button>
       </div>
     </div>
 
     <div id="notifStack" class="notif-stack"></div>
 
-    <div id="zombieBar" class="zombie-wrap">
-      <div class="zombie-text" id="zombieText">⚠ Ваш ПК находится под атакой зомби!</div>
+    <div class="zombie-wrap">
+      <div id="zombieText" class="zombie-text">⚠ Ваш ПК находится под атакой зомби!</div>
       <div class="zombie-progress"><span id="zombieProgress"></span></div>
     </div>
 
